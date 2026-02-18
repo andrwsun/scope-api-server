@@ -230,10 +230,10 @@
     <div class="control-group">
       <label>Scope Server</label>
       <div class="connect-row">
-        <input type="text" id="serverPort" value="8000" placeholder="8000">
+        <input type="text" id="serverPort" value="localhost:8000" placeholder="localhost:8000">
         <button id="connectBtn">Connect</button>
       </div>
-      <div class="port-note">Scope server port (default: 8000)</div>
+      <div class="port-note">Local: <code>localhost:8000</code> · RunPod: <code>abc123-8000.proxy.runpod.net</code></div>
     </div>
 
     <div id="status">Not connected</div>
@@ -404,7 +404,8 @@
 
     // --- WebSocket (receives OSC updates from server.py) ---
     function connectWebSocket() {
-      const wsUrl = `ws://${window.location.host}/ws`;
+      const wsProto = location.protocol === "https:" ? "wss" : "ws";
+      const wsUrl = `${wsProto}://${window.location.host}/ws`;
       const ws = new WebSocket(wsUrl);
 
       ws.onopen = () => {
@@ -709,8 +710,9 @@
         activePC = null;
       }
 
-      const port = serverPortInput.value.trim() || "8000";
-      API_BASE = `http://localhost:${port}`;
+      const host = serverPortInput.value.trim() || "localhost:8000";
+      const httpProto = location.protocol === "https:" ? "https" : "http";
+      API_BASE = `${httpProto}://${host}`;
       connectBtn.disabled = true;
       connectBtn.textContent = "Connecting...";
 
@@ -722,7 +724,7 @@
       } catch (error) {
         let msg = error.message;
         if (error instanceof TypeError && msg.includes("fetch")) {
-          msg = `Cannot reach Scope on port ${port} — is Scope running? (uv run daydream-scope)`;
+          msg = `Cannot reach Scope at ${host} — is Scope running? (uv run daydream-scope)`;
         } else if (msg.includes("Pipeline failed")) {
           msg = "Pipeline failed to load — is the text-display plugin installed?";
         }
