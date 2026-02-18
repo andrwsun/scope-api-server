@@ -513,10 +513,7 @@
       lastSendTime = now;
 
       if (!dataChannel || dataChannel.readyState !== "open") {
-        console.warn("Data channel not ready");
-        statusEl.textContent = "⚠️ Not connected - cannot send parameters";
-        statusEl.className = "error";
-        return;
+        return; // silently skip — status already shows not connected
       }
 
       const params = {

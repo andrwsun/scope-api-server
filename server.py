@@ -93,7 +93,7 @@ async def proxy_scope(path: str, request: Request):
     headers = {}
     if request.headers.get("content-type"):
         headers["content-type"] = request.headers["content-type"]
-    async with httpx.AsyncClient(timeout=30) as client:
+    async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
         resp = await client.request(request.method, url, content=body, headers=headers)
     return Response(content=resp.content, status_code=resp.status_code,
                     media_type=resp.headers.get("content-type"))
