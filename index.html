@@ -711,8 +711,13 @@
       }
 
       const host = serverPortInput.value.trim() || "localhost:8000";
-      const httpProto = location.protocol === "https:" ? "https" : "http";
-      API_BASE = `${httpProto}://${host}`;
+      // Tell the server which Scope host to proxy to, then use relative URLs
+      await fetch("/config/scope", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ host })
+      });
+      API_BASE = "";
       connectBtn.disabled = true;
       connectBtn.textContent = "Connecting...";
 

@@ -19,14 +19,12 @@
   <div id="status">connecting...</div>
 
   <script>
-    // Read ?scope= param — defaults to localhost:8000
+    // Read ?scope= param — if present, tell the bridge server which Scope to proxy to.
     // In TouchDesigner Web Render TOP, set URL to:
     //   http://localhost:8080/viewer                          (local)
     //   https://abc-8080.proxy.runpod.net/viewer?scope=abc-8000.proxy.runpod.net  (RunPod)
-    const params = new URLSearchParams(location.search);
-    const scopeHost = params.get("scope") || "localhost:8000";
-    const httpProto = location.protocol === "https:" ? "https" : "http";
-    const API_BASE  = `${httpProto}://${scopeHost}`;
+    const scopeParam = new URLSearchParams(location.search).get("scope");
+    const API_BASE = "";
 
     const videoEl  = document.getElementById("video");
     const statusEl = document.getElementById("status");
@@ -70,6 +68,15 @@
     // Connect to Scope and start streaming
     async function start() {
       try {
+        // If ?scope= was given, configure the bridge server to proxy there
+        if (scopeParam) {
+          await fetch("/config/scope", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ host: scopeParam })
+          }).catch(() => {});
+        }
+
         statusEl.textContent = "loading pipeline...";
 
         await fetch(`${API_BASE}/api/v1/pipeline/load`, {

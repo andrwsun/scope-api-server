@@ -3,6 +3,7 @@ Scope API Test Server
 - Serves index.html on port 8080
 - WebSocket endpoint at ws://localhost:8080/ws  (browser connects here)
 - OSC listener on port 9000                      (TouchDesigner/Max sends here)
+- Proxies /api/* to Scope engine (avoids CORS when Scope is remote)
 
 OSC message format:
   /text       "Hello World"   - text to display
@@ -12,7 +13,7 @@ OSC message format:
   /bg_opacity 0.5             - background opacity (0.0 - 1.0)
 
 Run with:
-  uv run --with "fastapi[standard]" --with python-osc python server.py
+  uv run --with "fastapi[standard]" --with python-osc --with httpx python server.py
 """
 
 import asyncio
@@ -21,9 +22,10 @@ import os
 import threading
 from pathlib import Path
 
+import httpx
 import uvicorn
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
+from fastapi.responses import HTMLResponse, Response
 from pythonosc.dispatcher import Dispatcher
 from pythonosc.osc_server import BlockingOSCUDPServer
 
@@ -33,6 +35,16 @@ HTTP_PORT = int(os.environ.get("HTTP_PORT", 8080))
 app = FastAPI()
 _clients: set[WebSocket] = set()
 _loop: asyncio.AbstractEventLoop | None = None
+_scope_host: str = os.environ.get("SCOPE_HOST", "localhost:8000")
+
+
+def _scope_url(path: str) -> str:
+    """Build the full URL for a Scope API call.
+    Uses https:// for remote hosts, http:// for localhost/127.x."""
+    host = _scope_host.rstrip("/")
+    is_local = host.startswith("localhost") or host.startswith("127.")
+    proto = "http" if is_local else "https"
+    return f"{proto}://{host}/{path.lstrip('/')}"
 
 
 async def _broadcast(data: dict):
@@ -59,6 +71,49 @@ async def index():
 async def viewer():
     html = (Path(__file__).parent / "viewer.html").read_text()
     return HTMLResponse(html)
+
+
+@app.post("/config/scope")
+async def config_scope(body: dict):
+    """Let the browser tell us which Scope host to proxy to."""
+    global _scope_host
+    host = body.get("host", "").strip()
+    # Strip any protocol prefix the user may have typed
+    for prefix in ("https://", "http://"):
+        if host.lower().startswith(prefix):
+            host = host[len(prefix):]
+    if host:
+        _scope_host = host
+        print(f"[CONFIG] Scope host → {_scope_host}")
+    return {"host": _scope_host}
+
+
+_SKIP_HEADERS = {"host", "content-length", "transfer-encoding", "connection", "content-encoding"}
+
+@app.api_route("/api/{path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"])
+async def proxy_scope(path: str, request: Request):
+    """Forward /api/* requests to the Scope engine, bypassing browser CORS."""
+    url = _scope_url(f"api/{path}")
+    body = await request.body()
+    headers = {k: v for k, v in request.headers.items() if k.lower() not in _SKIP_HEADERS}
+
+    async with httpx.AsyncClient(follow_redirects=True) as client:
+        resp = await client.request(
+            method=request.method,
+            url=url,
+            content=body,
+            headers=headers,
+            params=dict(request.query_params),
+        )
+    print(f"[PROXY] {request.method} {url} → {resp.status_code}")
+
+    resp_headers = {k: v for k, v in resp.headers.items() if k.lower() not in _SKIP_HEADERS}
+    return Response(
+        content=resp.content,
+        status_code=resp.status_code,
+        headers=resp_headers,
+        media_type=resp.headers.get("content-type"),
+    )
 
 
 @app.websocket("/ws")
