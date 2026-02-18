@@ -21,19 +21,14 @@ import os
 import threading
 from pathlib import Path
 
-import httpx
 import uvicorn
-from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse, Response
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.responses import HTMLResponse
 from pythonosc.dispatcher import Dispatcher
 from pythonosc.osc_server import BlockingOSCUDPServer
 
-OSC_PORT   = int(os.environ.get("OSC_PORT",  9000))
-HTTP_PORT  = int(os.environ.get("HTTP_PORT", 8080))
-
-# Where Scope is running. Override with SCOPE_HOST env var or via POST /config/scope.
-# Examples: "localhost:8000"  or  "abc123-8000.proxy.runpod.net"
-_scope_host: str = os.environ.get("SCOPE_HOST", "localhost:8000")
+OSC_PORT  = int(os.environ.get("OSC_PORT",  9000))
+HTTP_PORT = int(os.environ.get("HTTP_PORT", 8080))
 
 app = FastAPI()
 _clients: set[WebSocket] = set()
@@ -64,35 +59,6 @@ async def index():
 async def viewer():
     html = (Path(__file__).parent / "viewer.html").read_text()
     return HTMLResponse(html)
-
-
-@app.post("/config/scope")
-async def config_scope(request: Request):
-    """Let the browser tell the bridge which Scope instance to proxy to."""
-    global _scope_host
-    body = await request.json()
-    host = body.get("host", "").strip()
-    if not host:
-        return Response(status_code=400, content="missing host")
-    _scope_host = host
-    print(f"[CONFIG] Scope host set to: {_scope_host}")
-    return {"host": _scope_host}
-
-
-@app.api_route("/api/{path:path}", methods=["GET", "POST", "PATCH", "DELETE"])
-async def proxy_scope(path: str, request: Request):
-    """Proxy all /api/* requests to the configured Scope instance.
-    This avoids CORS — the browser always talks to the bridge (same origin)."""
-    proto = "https" if _scope_host.endswith(".runpod.net") else "http"
-    url = f"{proto}://{_scope_host}/api/{path}"
-    body = await request.body()
-    headers = {}
-    if request.headers.get("content-type"):
-        headers["content-type"] = request.headers["content-type"]
-    async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
-        resp = await client.request(request.method, url, content=body, headers=headers)
-    return Response(content=resp.content, status_code=resp.status_code,
-                    media_type=resp.headers.get("content-type"))
 
 
 @app.websocket("/ws")
@@ -168,7 +134,6 @@ async def startup():
 
     print(f"[HTTP] Serving on http://localhost:{HTTP_PORT}")
     print(f"[WS]  WebSocket at  ws://localhost:{HTTP_PORT}/ws")
-    print(f"[SCOPE] Proxying to {_scope_host}  (override: SCOPE_HOST env var or POST /config/scope)")
 
 
 if __name__ == "__main__":
