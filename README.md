@@ -36,6 +36,7 @@ You need **two things running** before opening the browser.
 ### Step 1 — Start Scope
 
 ```bash
+cd "/Users/andrew/Desktop/scope local"
 uv run daydream-scope
 ```
 
@@ -43,9 +44,10 @@ Leave this Terminal window open.
 
 ### Step 2 — Start the control server
 
-Open a second Terminal window, navigate to this folder, and run:
+Open a **second** Terminal window and run:
 
 ```bash
+cd "/Users/andrew/Desktop/scope local/scope api test"
 uv run --with "fastapi[standard]" --with python-osc python server.py
 ```
 
