@@ -35,6 +35,10 @@ HTTP_PORT  = int(os.environ.get("HTTP_PORT", 8080))
 # Examples: "localhost:8000"  or  "abc123-8000.proxy.runpod.net"
 _scope_host: str = os.environ.get("SCOPE_HOST", "localhost:8000")
 
+# Last-known pipeline parameter state — updated by OSC and by POST /params.
+# Sent to new WebSocket clients on connect so the viewer initialises in sync.
+_params: dict = {}
+
 app = FastAPI()
 _clients: set[WebSocket] = set()
 _loop: asyncio.AbstractEventLoop | None = None
@@ -95,11 +99,34 @@ async def proxy_scope(path: str, request: Request):
                     media_type=resp.headers.get("content-type"))
 
 
+@app.post("/params")
+async def update_params(request: Request):
+    """Control UI calls this when it manually sends params.
+    Server caches the state and broadcasts to all clients so the viewer stays in sync."""
+    global _params
+    body = await request.json()
+    _params.update({k: v for k, v in body.items() if not k.startswith("_")})
+    await _broadcast({**body, "_mapped": True})
+    return {"ok": True}
+
+
+@app.get("/params")
+async def get_params():
+    """Return the current cached param state."""
+    return _params
+
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
     _clients.add(websocket)
     print(f"[WS] Browser connected  ({len(_clients)} total)")
+    # Send current param state immediately so new viewers initialise in sync
+    if _params:
+        try:
+            await websocket.send_text(json.dumps({**_params, "_mapped": True}))
+        except Exception:
+            pass
     try:
         while True:
             await websocket.receive_text()
@@ -140,6 +167,7 @@ def _osc_handler(address: str, *args):
         print(f"[OSC] Bad value for {address}: {raw}")
         return
     print(f"[OSC] {address} → {key} = {value!r}")
+    _params[key] = value
     if _loop:
         asyncio.run_coroutine_threadsafe(
             _broadcast({key: value, "_mapped": True}),

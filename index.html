@@ -528,6 +528,13 @@
       };
 
       dataChannel.send(JSON.stringify(params));
+
+      // Sync state to bridge so viewer and future connections stay in sync
+      fetch("/params", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(params)
+      });
     }
 
     // Update button click
