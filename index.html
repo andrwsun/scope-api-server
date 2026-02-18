@@ -579,6 +579,10 @@
         }
       };
 
+      // Scope requires a video transceiver in the offer (returns 500 without it).
+      // We add it but don't attach to any <video> element so nothing is displayed.
+      pc.addTransceiver("video", { direction: "recvonly" });
+
       // Create and send offer with initial parameters
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
