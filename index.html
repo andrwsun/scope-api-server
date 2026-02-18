@@ -377,6 +377,10 @@
       ws.onmessage = (event) => {
         const data = JSON.parse(event.data);
 
+        // _from_ui means this is an echo of our own broadcast — ignore it
+        // to avoid a feedback loop where we re-send our own updates endlessly.
+        if (data._from_ui) return;
+
         // Only apply to UI if it's a known/mapped parameter
         if (data._mapped !== false) {
           if (data.text !== undefined)       textInput.value   = data.text;
@@ -443,18 +447,13 @@
     blueSlider.addEventListener('input', () => { updateDisplays(); if (autoUpdate) sendParameters(); });
     bgSlider.addEventListener('input', () => { updateDisplays(); if (autoUpdate) sendParameters(); });
 
-    // Send parameters to Scope via WebRTC data channel
+    // Send parameters to Scope.
+    // Broadcasts via server.py so the viewer's data channel picks them up,
+    // and also sends directly on the local data channel if it's open.
     function sendParameters() {
       const now = performance.now();
       if (now - lastSendTime < SEND_INTERVAL_MS) return;
       lastSendTime = now;
-
-      if (!dataChannel || dataChannel.readyState !== "open") {
-        console.warn("Data channel not ready");
-        statusEl.textContent = "⚠️ Not connected - cannot send parameters";
-        statusEl.className = "error";
-        return;
-      }
 
       const params = {
         text: textInput.value,
@@ -464,7 +463,17 @@
         bg_opacity: parseFloat(bgSlider.value)
       };
 
-      dataChannel.send(JSON.stringify(params));
+      // Broadcast via server → WebSocket → viewer's data channel (primary path)
+      fetch("/broadcast", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(params)
+      }).catch(() => {});
+
+      // Also send on local data channel if connected
+      if (dataChannel && dataChannel.readyState === "open") {
+        dataChannel.send(JSON.stringify(params));
+      }
     }
 
     // Update button click

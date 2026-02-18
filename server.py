@@ -88,6 +88,14 @@ async def config_scope(body: dict):
     return {"host": _scope_host}
 
 
+@app.post("/broadcast")
+async def broadcast_params(body: dict):
+    """Push parameter updates from the control UI to all connected browser clients.
+    The viewer receives these and forwards them to Scope via its own data channel."""
+    await _broadcast({**body, "_mapped": True, "_from_ui": True})
+    return {"ok": True}
+
+
 _SKIP_HEADERS = {"host", "content-length", "transfer-encoding", "connection", "content-encoding"}
 
 @app.api_route("/api/{path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"])
