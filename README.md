@@ -48,7 +48,7 @@ Open a **second** Terminal window and run:
 
 ```bash
 cd "/Users/andrew/Desktop/scope local/scope api test"
-uv run --with "fastapi[standard]" --with python-osc python server.py
+uv run --with "fastapi[standard]" --with python-osc --with httpx python server.py
 ```
 
 Leave this Terminal window open too.
@@ -102,10 +102,10 @@ Then type messages like:
 
 ```bash
 # Change OSC port (default 9000)
-OSC_PORT=9001 uv run --with "fastapi[standard]" --with python-osc python server.py
+OSC_PORT=9001 uv run --with "fastapi[standard]" --with python-osc --with httpx python server.py
 
 # Change web UI port (default 8080)
-HTTP_PORT=8081 uv run --with "fastapi[standard]" --with python-osc python server.py
+HTTP_PORT=8081 uv run --with "fastapi[standard]" --with python-osc --with httpx python server.py
 ```
 
 ---

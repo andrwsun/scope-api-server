@@ -319,7 +319,9 @@
   </div>
 
   <script>
-    let API_BASE = "http://localhost:8000";
+    // API calls always go through the bridge server (same origin → no CORS).
+    // The bridge proxies them to whatever Scope instance is configured.
+    const API_BASE = "";
     const statusEl = document.getElementById("status");
     const videoEl = document.getElementById("video");
 
@@ -711,10 +713,15 @@
       }
 
       const host = serverPortInput.value.trim() || "localhost:8000";
-      const httpProto = location.protocol === "https:" ? "https" : "http";
-      API_BASE = `${httpProto}://${host}`;
       connectBtn.disabled = true;
       connectBtn.textContent = "Connecting...";
+
+      // Tell the bridge which Scope to proxy to (server-to-server, no CORS)
+      await fetch("/config/scope", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ host })
+      });
 
       try {
         updateDisplays();
