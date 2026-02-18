@@ -16,29 +16,15 @@
       background: #000;
       color: #fff;
       display: flex;
-      height: 100vh;
-    }
-
-    #video-container {
-      flex: 1;
-      display: flex;
       justify-content: center;
-      align-items: center;
-      background: #111;
-    }
-
-    video {
-      max-width: 100%;
-      max-height: 100vh;
-      border: 2px solid #333;
+      min-height: 100vh;
     }
 
     #controls {
-      width: 350px;
+      width: 400px;
       background: #1a1a1a;
       padding: 20px;
       overflow-y: auto;
-      border-left: 1px solid #333;
     }
 
     h1 {
@@ -63,23 +49,6 @@
 
     #status.error {
       color: #ff4444;
-    }
-
-    #fps-display {
-      padding: 10px;
-      background: #222;
-      border-radius: 4px;
-      margin-bottom: 20px;
-      font-family: monospace;
-      font-size: 12px;
-      color: #888;
-      display: flex;
-      justify-content: space-between;
-    }
-
-    #fps-display span {
-      color: #00ff88;
-      font-weight: 600;
     }
 
     .control-group {
@@ -220,10 +189,6 @@
   </style>
 </head>
 <body>
-  <div id="video-container">
-    <video id="video" autoplay muted playsinline></video>
-  </div>
-
   <div id="controls">
     <h1>🎨 Text Display Control</h1>
 
@@ -237,10 +202,6 @@
     </div>
 
     <div id="status">Not connected</div>
-
-    <div id="fps-display">
-      <span>FPS:</span> <span id="fps-value">--</span>
-    </div>
 
     <div class="control-group">
       <label>Text Message</label>
@@ -321,7 +282,6 @@
   <script>
     let API_BASE = "http://localhost:8000";
     const statusEl = document.getElementById("status");
-    const videoEl = document.getElementById("video");
 
     // Control elements
     const serverPortInput = document.getElementById("serverPort");
@@ -443,27 +403,6 @@
 
     connectWebSocket();
 
-    // FPS tracking
-    const fpsEl = document.getElementById("fps-value");
-    let frameCount = 0;
-    let lastFpsTime = performance.now();
-
-    function trackFPS() {
-      if ("requestVideoFrameCallback" in HTMLVideoElement.prototype) {
-        videoEl.requestVideoFrameCallback(function countFrame() {
-          frameCount++;
-          const now = performance.now();
-          const elapsed = now - lastFpsTime;
-          if (elapsed >= 1000) {
-            fpsEl.textContent = (frameCount / (elapsed / 1000)).toFixed(1);
-            frameCount = 0;
-            lastFpsTime = now;
-          }
-          videoEl.requestVideoFrameCallback(countFrame);
-        });
-      }
-    }
-
     // Update slider value displays and color preview
     function updateDisplays() {
       redValue.textContent = parseFloat(redSlider.value).toFixed(2);
@@ -584,7 +523,7 @@
       dataChannel = pc.createDataChannel("parameters", { ordered: true });
 
       dataChannel.onopen = () => {
-        statusEl.textContent = "Connected - Streaming";
+        statusEl.textContent = "Connected";
         statusEl.className = "connected";
         console.log("✅ Data channel open - sending pipeline_ids");
 
@@ -609,20 +548,9 @@
         }
       };
 
-      // Add video transceiver (receive-only mode)
-      pc.addTransceiver("video");
-
-      // Handle incoming video track
-      pc.ontrack = (event) => {
-        if (event.streams && event.streams[0]) {
-          videoEl.srcObject = event.streams[0];
-          trackFPS();
-        }
-      };
-
       pc.onconnectionstatechange = () => {
         if (pc.connectionState === "connected") {
-          statusEl.textContent = "Connected - Streaming";
+          statusEl.textContent = "Connected";
           statusEl.className = "connected";
         } else if (pc.connectionState === "failed" || pc.connectionState === "disconnected") {
           statusEl.textContent = "Disconnected";
