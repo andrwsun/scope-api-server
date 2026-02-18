@@ -12,11 +12,17 @@
       font-family: monospace; font-size: 11px; color: #444;
       pointer-events: none;
     }
+    #info {
+      position: fixed; bottom: 10px; left: 12px;
+      font-family: monospace; font-size: 11px; color: #444;
+      pointer-events: none;
+    }
   </style>
 </head>
 <body>
   <video id="video" autoplay muted playsinline></video>
   <div id="status">connecting...</div>
+  <div id="info"></div>
 
   <script>
     // Read ?scope= param — if present, tell the bridge server which Scope to proxy to.
@@ -28,10 +34,41 @@
 
     const videoEl  = document.getElementById("video");
     const statusEl = document.getElementById("status");
+    const infoEl   = document.getElementById("info");
+
+    // Build the connection label: "local" or "runpod · <podId>"
+    function connectionLabel() {
+      if (!scopeParam) return "local";
+      if (scopeParam.includes(".proxy.runpod.net")) {
+        const podPart = scopeParam.split(".proxy.runpod.net")[0]; // e.g. spn9b77k24v6c3-8000
+        const podId = podPart.substring(0, podPart.lastIndexOf("-")); // e.g. spn9b77k24v6c3
+        return `runpod · ${podId}`;
+      }
+      return scopeParam;
+    }
 
     let dataChannel = null;
     let pendingParams = {};
     let sendTimer = null;
+
+    // FPS counter via requestVideoFrameCallback
+    let _frameCount = 0, _fpsTime = performance.now();
+    function startFPS() {
+      if (!videoEl.requestVideoFrameCallback) return;
+      const label = connectionLabel();
+      function onFrame() {
+        _frameCount++;
+        const now = performance.now();
+        if (now - _fpsTime >= 1000) {
+          const fps = (_frameCount / ((now - _fpsTime) / 1000)).toFixed(1);
+          infoEl.textContent = `${label} · ${fps} fps`;
+          _frameCount = 0;
+          _fpsTime = now;
+        }
+        videoEl.requestVideoFrameCallback(onFrame);
+      }
+      videoEl.requestVideoFrameCallback(onFrame);
+    }
 
     // Batch and throttle param sends to Scope (60fps cap)
     function scheduleSend() {
@@ -102,6 +139,7 @@
         dataChannel = pc.createDataChannel("parameters", { ordered: true });
         dataChannel.onopen = () => {
           statusEl.textContent = "";
+          infoEl.textContent = connectionLabel();
           dataChannel.send(JSON.stringify({
             pipeline_ids: ["text-display"],
             input_mode: "text",
@@ -119,7 +157,10 @@
 
         pc.addTransceiver("video");
         pc.ontrack = (event) => {
-          if (event.streams?.[0]) videoEl.srcObject = event.streams[0];
+          if (event.streams?.[0]) {
+            videoEl.srcObject = event.streams[0];
+            startFPS();
+          }
         };
 
         const offer = await pc.createOffer();
