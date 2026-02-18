@@ -16,14 +16,21 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 
 Then restart your Terminal.
 
-### 2. Install the text-display plugin into Scope
+### 2. Clone and install the Scope plugins
 
-From this repo's root folder:
+Clone each plugin repo next to this folder, then install them:
 
 ```bash
-cd ../scope-text-display
-uv pip install -e .
+# Text display plugin (renders text on screen)
+git clone https://github.com/andrwsun/scope-text-display ../scope-text-display
+cd ../scope-text-display && uv pip install -e . && cd -
+
+# Color test plugin
+git clone https://github.com/andrwsun/scope-color-test ../scope-color-test
+cd ../scope-color-test && uv pip install -e . && cd -
 ```
+
+You only need to do this once. If a plugin is updated later, `cd` into it and run `git pull` — no reinstall needed.
 
 ---
 
