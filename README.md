@@ -36,7 +36,7 @@ You need **two things running** before opening the browser.
 ### Step 1 — Start Scope
 
 ```bash
-cd "/Users/andrew/Desktop/scope local"
+cd "/Users/andrew/Desktop/scope"
 uv run daydream-scope
 ```
 
