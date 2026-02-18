@@ -123,7 +123,7 @@
         });
 
         while (true) {
-          const r = await fetch(`${API_BASE}/api/v1/pipeline/status`);
+          const r = await fetch(`${API_BASE}/api/v1/pipeline/status`, { cache: "no-store" });
           const { status } = await r.json();
           if (status === "loaded") break;
           if (status === "error") throw new Error("Pipeline failed to load");
@@ -132,7 +132,7 @@
 
         statusEl.textContent = "connecting WebRTC...";
 
-        const iceRes  = await fetch(`${API_BASE}/api/v1/webrtc/ice-servers`);
+        const iceRes  = await fetch(`${API_BASE}/api/v1/webrtc/ice-servers`, { cache: "no-store" });
         const { iceServers } = await iceRes.json();
         const pc = new RTCPeerConnection({ iceServers });
 

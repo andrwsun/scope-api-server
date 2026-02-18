@@ -494,7 +494,7 @@
 
       // Wait for pipeline to finish loading
       while (true) {
-        const response = await fetch(`${API_BASE}/api/v1/pipeline/status`);
+        const response = await fetch(`${API_BASE}/api/v1/pipeline/status`, { cache: "no-store" });
         const { status } = await response.json();
 
         if (status === "loaded") break;
@@ -510,7 +510,7 @@
       statusEl.textContent = "Establishing WebRTC connection...";
 
       // Get ICE servers
-      const iceResponse = await fetch(`${API_BASE}/api/v1/webrtc/ice-servers`);
+      const iceResponse = await fetch(`${API_BASE}/api/v1/webrtc/ice-servers`, { cache: "no-store" });
       const { iceServers } = await iceResponse.json();
 
       // Create peer connection
