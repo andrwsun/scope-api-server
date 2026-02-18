@@ -1,0 +1,125 @@
+# Scope Control Interface
+
+A custom browser UI for controlling Scope's `text-display` pipeline in real-time, with TouchDesigner OSC support.
+
+---
+
+## First-time setup (do this once)
+
+### 1. Install `uv`
+
+`uv` is a Python tool manager. Open Terminal and run:
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+Then restart your Terminal.
+
+### 2. Install the text-display plugin into Scope
+
+From this repo's root folder:
+
+```bash
+cd ../scope-text-display
+uv pip install -e .
+```
+
+---
+
+## Starting the interface (every time)
+
+You need **two things running** before opening the browser.
+
+### Step 1 — Start Scope
+
+```bash
+uv run daydream-scope
+```
+
+Leave this Terminal window open.
+
+### Step 2 — Start the control server
+
+Open a second Terminal window, navigate to this folder, and run:
+
+```bash
+uv run --with "fastapi[standard]" --with python-osc python server.py
+```
+
+Leave this Terminal window open too.
+
+### Step 3 — Open the browser
+
+Go to: **http://localhost:8080**
+
+Click **Connect** to link up to Scope. You should see the video stream appear.
+
+---
+
+## TouchDesigner setup
+
+In TouchDesigner, add an **OSC Out CHOP** with these settings:
+
+| Setting | Value |
+|---------|-------|
+| Host | `127.0.0.1` (same machine) or the server's IP (remote) |
+| Port | `9000` |
+| Protocol | UDP |
+
+Send messages to these addresses:
+
+| Address | Type | Effect |
+|---------|------|--------|
+| `/text` | string | Text to display |
+| `/text_r` | float 0–1 | Text red |
+| `/text_g` | float 0–1 | Text green |
+| `/text_b` | float 0–1 | Text blue |
+| `/bg_opacity` | float 0–1 | Background opacity |
+
+---
+
+## Testing OSC without TouchDesigner
+
+```bash
+uv run --with python-osc python osc_send.py
+```
+
+Then type messages like:
+```
+> /text_r 0.8
+> /text Hello World
+> /bg_opacity 0.5
+```
+
+---
+
+## Changing ports (if you have a conflict)
+
+```bash
+# Change OSC port (default 9000)
+OSC_PORT=9001 uv run --with "fastapi[standard]" --with python-osc python server.py
+
+# Change web UI port (default 8080)
+HTTP_PORT=8081 uv run --with "fastapi[standard]" --with python-osc python server.py
+```
+
+---
+
+## How it all fits together
+
+```
+TouchDesigner
+    │ OSC/UDP → :9000
+    ▼
+server.py  (http://localhost:8080)
+    │ WebSocket
+    ▼
+Your Browser
+    │ WebRTC
+    ▼
+Scope  (http://localhost:8000)
+    │ Video stream
+    ▼
+Your Browser (video display)
+```

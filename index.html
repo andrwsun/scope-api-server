@@ -1,0 +1,744 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Scope API Test - Text Display Control</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #000;
+      color: #fff;
+      display: flex;
+      height: 100vh;
+    }
+
+    #video-container {
+      flex: 1;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: #111;
+    }
+
+    video {
+      max-width: 100%;
+      max-height: 100vh;
+      border: 2px solid #333;
+    }
+
+    #controls {
+      width: 350px;
+      background: #1a1a1a;
+      padding: 20px;
+      overflow-y: auto;
+      border-left: 1px solid #333;
+    }
+
+    h1 {
+      font-size: 18px;
+      margin-bottom: 20px;
+      color: #00ff88;
+    }
+
+    #status {
+      padding: 10px;
+      background: #222;
+      border-radius: 4px;
+      margin-bottom: 10px;
+      font-family: monospace;
+      font-size: 12px;
+      color: #888;
+    }
+
+    #status.connected {
+      color: #00ff88;
+    }
+
+    #status.error {
+      color: #ff4444;
+    }
+
+    #fps-display {
+      padding: 10px;
+      background: #222;
+      border-radius: 4px;
+      margin-bottom: 20px;
+      font-family: monospace;
+      font-size: 12px;
+      color: #888;
+      display: flex;
+      justify-content: space-between;
+    }
+
+    #fps-display span {
+      color: #00ff88;
+      font-weight: 600;
+    }
+
+    .control-group {
+      margin-bottom: 20px;
+    }
+
+    label {
+      display: block;
+      font-size: 12px;
+      font-weight: 600;
+      margin-bottom: 8px;
+      color: #aaa;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    input[type="text"] {
+      width: 100%;
+      padding: 10px;
+      background: #222;
+      border: 1px solid #333;
+      border-radius: 4px;
+      color: #fff;
+      font-size: 14px;
+    }
+
+    input[type="text"]:focus {
+      outline: none;
+      border-color: #00ff88;
+    }
+
+    input[type="range"] {
+      width: 100%;
+      height: 6px;
+      background: #333;
+      border-radius: 3px;
+      outline: none;
+      -webkit-appearance: none;
+    }
+
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 16px;
+      height: 16px;
+      background: #00ff88;
+      border-radius: 50%;
+      cursor: pointer;
+    }
+
+    input[type="range"]::-moz-range-thumb {
+      width: 16px;
+      height: 16px;
+      background: #00ff88;
+      border-radius: 50%;
+      cursor: pointer;
+      border: none;
+    }
+
+    .slider-value {
+      display: inline-block;
+      float: right;
+      font-size: 12px;
+      color: #00ff88;
+      font-weight: 600;
+    }
+
+    .color-preview {
+      width: 100%;
+      height: 40px;
+      border-radius: 4px;
+      margin-top: 10px;
+      border: 1px solid #333;
+    }
+
+    button {
+      width: 100%;
+      padding: 12px;
+      background: #00ff88;
+      color: #000;
+      border: none;
+      border-radius: 4px;
+      font-weight: 600;
+      cursor: pointer;
+      font-size: 14px;
+      transition: background 0.2s;
+    }
+
+    button:hover {
+      background: #00dd77;
+    }
+
+    button:active {
+      background: #00bb66;
+    }
+
+    .info {
+      margin-top: 20px;
+      padding: 15px;
+      background: #222;
+      border-radius: 4px;
+      font-size: 12px;
+      line-height: 1.6;
+      color: #888;
+    }
+
+    .info code {
+      background: #333;
+      padding: 2px 6px;
+      border-radius: 3px;
+      font-family: monospace;
+      color: #00ff88;
+    }
+
+    .connect-row {
+      display: flex;
+      gap: 8px;
+      align-items: stretch;
+    }
+
+    .connect-row input[type="text"] {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .connect-row button {
+      width: auto;
+      padding: 10px 16px;
+      font-size: 13px;
+      white-space: nowrap;
+    }
+
+    .port-note {
+      margin-top: 6px;
+      font-size: 11px;
+      color: #555;
+    }
+  </style>
+</head>
+<body>
+  <div id="video-container">
+    <video id="video" autoplay muted playsinline></video>
+  </div>
+
+  <div id="controls">
+    <h1>🎨 Text Display Control</h1>
+
+    <div class="control-group">
+      <label>Scope Server</label>
+      <div class="connect-row">
+        <input type="text" id="serverPort" value="8000" placeholder="8000">
+        <button id="connectBtn">Connect</button>
+      </div>
+      <div class="port-note">Scope server port (default: 8000)</div>
+    </div>
+
+    <div id="status">Not connected</div>
+
+    <div id="fps-display">
+      <span>FPS:</span> <span id="fps-value">--</span>
+    </div>
+
+    <div class="control-group">
+      <label>Text Message</label>
+      <input type="text" id="textInput" value="Hello Scope!" placeholder="Enter text...">
+    </div>
+
+    <div class="control-group">
+      <label>
+        Text Red
+        <span class="slider-value" id="redValue">1.00</span>
+      </label>
+      <input type="range" id="redSlider" min="0" max="1" step="0.01" value="1">
+    </div>
+
+    <div class="control-group">
+      <label>
+        Text Green
+        <span class="slider-value" id="greenValue">1.00</span>
+      </label>
+      <input type="range" id="greenSlider" min="0" max="1" step="0.01" value="1">
+    </div>
+
+    <div class="control-group">
+      <label>
+        Text Blue
+        <span class="slider-value" id="blueValue">1.00</span>
+      </label>
+      <input type="range" id="blueSlider" min="0" max="1" step="0.01" value="1">
+    </div>
+
+    <div class="control-group">
+      <label>Color Preview</label>
+      <div class="color-preview" id="colorPreview"></div>
+    </div>
+
+    <div class="control-group">
+      <label>
+        Background Opacity
+        <span class="slider-value" id="bgValue">0.00</span>
+      </label>
+      <input type="range" id="bgSlider" min="0" max="1" step="0.01" value="0">
+    </div>
+
+    <div class="control-group">
+      <button id="updateBtn">Update Parameters</button>
+    </div>
+
+    <div class="control-group">
+      <button id="autoBtn" style="background:#333; color:#aaa; border:1px solid #555;">Auto-update: OFF</button>
+    </div>
+
+    <div style="margin-top:20px;">
+      <label style="display:flex; justify-content:space-between; align-items:center;">
+        OSC LOG <span style="color:#555; font-size:10px; font-weight:400; text-transform:none; letter-spacing:0;">listening on UDP :9000</span>
+        <span id="oscStatus" style="font-size:10px; color:#555; text-transform:none; letter-spacing:0;">● not connected</span>
+      </label>
+      <div style="display:flex; gap:4px; margin-bottom:6px;">
+        <button id="filterAll"     onclick="setFilter('all')"     style="width:auto;padding:4px 10px;font-size:11px;background:#00ff88;color:#000;border:none;">All</button>
+        <button id="filterMapped"  onclick="setFilter('mapped')"  style="width:auto;padding:4px 10px;font-size:11px;background:#333;color:#aaa;border:1px solid #555;">Valid</button>
+        <button id="filterUnknown" onclick="setFilter('unknown')" style="width:auto;padding:4px 10px;font-size:11px;background:#333;color:#aaa;border:1px solid #555;">Unknown</button>
+        <button onclick="oscLog.innerHTML=''" style="width:auto;padding:4px 10px;font-size:11px;background:#333;color:#aaa;border:1px solid #555;margin-left:auto;">Clear</button>
+      </div>
+      <div id="oscLog" style="
+        background:#111;
+        border:1px solid #222;
+        border-radius:4px;
+        padding:8px;
+        height:160px;
+        overflow-y:auto;
+        font-family:monospace;
+        font-size:11px;
+        color:#555;
+        line-height:1.6;
+      ">waiting for OSC...</div>
+    </div>
+  </div>
+
+  <script>
+    let API_BASE = "http://localhost:8000";
+    const statusEl = document.getElementById("status");
+    const videoEl = document.getElementById("video");
+
+    // Control elements
+    const serverPortInput = document.getElementById("serverPort");
+    const connectBtn = document.getElementById("connectBtn");
+    const textInput = document.getElementById("textInput");
+    const redSlider = document.getElementById("redSlider");
+    const greenSlider = document.getElementById("greenSlider");
+    const blueSlider = document.getElementById("blueSlider");
+    const bgSlider = document.getElementById("bgSlider");
+    const updateBtn = document.getElementById("updateBtn");
+    const colorPreview = document.getElementById("colorPreview");
+
+    // Value displays
+    const redValue = document.getElementById("redValue");
+    const greenValue = document.getElementById("greenValue");
+    const blueValue = document.getElementById("blueValue");
+    const bgValue = document.getElementById("bgValue");
+
+    let dataChannel = null;
+    const SEND_INTERVAL_MS = 1000 / 60; // 60fps cap
+    let lastSendTime = 0;
+    let oscBatchTimer = null; // batches rapid OSC bursts into one Scope update
+
+    // --- OSC log box ---
+    const oscLog = document.getElementById("oscLog");
+    const oscStatus = document.getElementById("oscStatus");
+
+    let oscFilter = "all";
+
+    function setFilter(f) {
+      oscFilter = f;
+      const btns = { all: "filterAll", mapped: "filterMapped", unknown: "filterUnknown" };
+      Object.entries(btns).forEach(([key, id]) => {
+        const btn = document.getElementById(id);
+        const active = key === f;
+        btn.style.background = active ? "#00ff88" : "#333";
+        btn.style.color      = active ? "#000"    : "#aaa";
+        btn.style.border     = active ? "none"    : "1px solid #555";
+      });
+      // Show/hide existing rows
+      [...oscLog.querySelectorAll("div[data-type]")].forEach(el => {
+        el.style.display = (oscFilter === "all" || el.dataset.type === oscFilter) ? "" : "none";
+      });
+    }
+
+    function logOSC(data) {
+      const time = new Date().toLocaleTimeString("en", { hour12: false });
+      const line = document.createElement("div");
+      let html, type;
+
+      if (data._mapped === false) {
+        // Unknown/unmapped address
+        type = "unknown";
+        html = `<span style="color:#444">${time}</span>  `
+             + `<span style="color:#ff9900">${data._osc_address}</span> `
+             + `<span style="color:#ffcc66">${data._osc_value}</span> `
+             + `<span style="color:#555; font-size:10px;">⚠ unmapped</span>`;
+      } else {
+        // Valid mapped address — strip internal _mapped key
+        type = "mapped";
+        const entries = Object.entries(data)
+          .filter(([k]) => !k.startsWith("_"))
+          .map(([k, v]) =>
+            `<span style="color:#00ff88">${k}</span> <span style="color:#fff">${typeof v === "number" ? v.toFixed(3) : v}</span>`
+          ).join("  ");
+        html = `<span style="color:#444">${time}</span>  ${entries}`;
+      }
+
+      line.dataset.type = type;
+      line.innerHTML = html;
+      if (oscFilter !== "all" && type !== oscFilter) line.style.display = "none";
+
+      // Clear placeholder text on first real message
+      if (oscLog.firstChild && oscLog.firstChild.nodeType === Node.TEXT_NODE) oscLog.innerHTML = "";
+
+      oscLog.appendChild(line);
+      while (oscLog.children.length > 100) oscLog.removeChild(oscLog.firstChild);
+      oscLog.scrollTop = oscLog.scrollHeight;
+    }
+
+    // --- WebSocket (receives OSC updates from server.py) ---
+    function connectWebSocket() {
+      const wsUrl = `ws://${window.location.host}/ws`;
+      const ws = new WebSocket(wsUrl);
+
+      ws.onopen = () => {
+        oscStatus.textContent = "● connected";
+        oscStatus.style.color = "#00ff88";
+        oscLog.innerHTML = "";
+      };
+
+      ws.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+
+        // Only apply to UI if it's a known/mapped parameter
+        if (data._mapped !== false) {
+          if (data.text !== undefined)       textInput.value   = data.text;
+          if (data.text_r !== undefined)     redSlider.value   = data.text_r;
+          if (data.text_g !== undefined)     greenSlider.value = data.text_g;
+          if (data.text_b !== undefined)     blueSlider.value  = data.text_b;
+          if (data.bg_opacity !== undefined) bgSlider.value    = data.bg_opacity;
+          updateDisplays();
+          // Batch rapid OSC bursts — wait 16ms for all params in the same
+          // script execution to arrive before sending once to Scope
+          clearTimeout(oscBatchTimer);
+          oscBatchTimer = setTimeout(sendParameters, 16);
+        }
+
+        logOSC(data);
+      };
+
+      ws.onclose = () => {
+        oscStatus.textContent = "● disconnected";
+        oscStatus.style.color = "#ff4444";
+        setTimeout(connectWebSocket, 2000);
+      };
+    }
+
+    connectWebSocket();
+
+    // FPS tracking
+    const fpsEl = document.getElementById("fps-value");
+    let frameCount = 0;
+    let lastFpsTime = performance.now();
+
+    function trackFPS() {
+      if ("requestVideoFrameCallback" in HTMLVideoElement.prototype) {
+        videoEl.requestVideoFrameCallback(function countFrame() {
+          frameCount++;
+          const now = performance.now();
+          const elapsed = now - lastFpsTime;
+          if (elapsed >= 1000) {
+            fpsEl.textContent = (frameCount / (elapsed / 1000)).toFixed(1);
+            frameCount = 0;
+            lastFpsTime = now;
+          }
+          videoEl.requestVideoFrameCallback(countFrame);
+        });
+      }
+    }
+
+    // Update slider value displays and color preview
+    function updateDisplays() {
+      redValue.textContent = parseFloat(redSlider.value).toFixed(2);
+      greenValue.textContent = parseFloat(greenSlider.value).toFixed(2);
+      blueValue.textContent = parseFloat(blueSlider.value).toFixed(2);
+      bgValue.textContent = parseFloat(bgSlider.value).toFixed(2);
+
+      // Update color preview
+      const r = Math.round(redSlider.value * 255);
+      const g = Math.round(greenSlider.value * 255);
+      const b = Math.round(blueSlider.value * 255);
+      colorPreview.style.backgroundColor = `rgb(${r}, ${g}, ${b})`;
+    }
+
+    // Auto-update toggle
+    let autoUpdate = false;
+    let debounceTimer = null;
+    const autoBtn = document.getElementById("autoBtn");
+
+    autoBtn.addEventListener('click', () => {
+      autoUpdate = !autoUpdate;
+      if (autoUpdate) {
+        autoBtn.textContent = "Auto-update: ON";
+        autoBtn.style.background = "#00ff88";
+        autoBtn.style.color = "#000";
+        autoBtn.style.border = "none";
+      } else {
+        autoBtn.textContent = "Auto-update: OFF";
+        autoBtn.style.background = "#333";
+        autoBtn.style.color = "#aaa";
+        autoBtn.style.border = "1px solid #555";
+      }
+    });
+
+    // Attach event listeners
+    redSlider.addEventListener('input', () => { updateDisplays(); if (autoUpdate) sendParameters(); });
+    greenSlider.addEventListener('input', () => { updateDisplays(); if (autoUpdate) sendParameters(); });
+    blueSlider.addEventListener('input', () => { updateDisplays(); if (autoUpdate) sendParameters(); });
+    bgSlider.addEventListener('input', () => { updateDisplays(); if (autoUpdate) sendParameters(); });
+
+    // Send parameters to Scope via WebRTC data channel
+    function sendParameters() {
+      const now = performance.now();
+      if (now - lastSendTime < SEND_INTERVAL_MS) return;
+      lastSendTime = now;
+
+      if (!dataChannel || dataChannel.readyState !== "open") {
+        console.warn("Data channel not ready");
+        statusEl.textContent = "⚠️ Not connected - cannot send parameters";
+        statusEl.className = "error";
+        return;
+      }
+
+      const params = {
+        text: textInput.value,
+        text_r: parseFloat(redSlider.value),
+        text_g: parseFloat(greenSlider.value),
+        text_b: parseFloat(blueSlider.value),
+        bg_opacity: parseFloat(bgSlider.value)
+      };
+
+      dataChannel.send(JSON.stringify(params));
+    }
+
+    // Update button click
+    updateBtn.addEventListener('click', sendParameters);
+
+    // Text input: Enter always sends; typing sends with debounce when auto-update is on
+    textInput.addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') sendParameters();
+    });
+    textInput.addEventListener('input', () => {
+      if (!autoUpdate) return;
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(sendParameters, 300);
+    });
+
+    // Load pipeline and start streaming
+    async function loadPipeline() {
+      statusEl.textContent = "Loading text-display pipeline...";
+
+      await fetch(`${API_BASE}/api/v1/pipeline/load`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          pipeline_ids: ["text-display"]
+        })
+      });
+
+      // Wait for pipeline to finish loading
+      while (true) {
+        const response = await fetch(`${API_BASE}/api/v1/pipeline/status`);
+        const { status } = await response.json();
+
+        if (status === "loaded") break;
+        if (status === "error") throw new Error("Pipeline failed to load");
+
+        await new Promise(r => setTimeout(r, 1000));
+      }
+
+      statusEl.textContent = "Pipeline loaded ✓";
+    }
+
+    async function startStream() {
+      statusEl.textContent = "Establishing WebRTC connection...";
+
+      // Get ICE servers
+      const iceResponse = await fetch(`${API_BASE}/api/v1/webrtc/ice-servers`);
+      const { iceServers } = await iceResponse.json();
+
+      // Create peer connection
+      const pc = new RTCPeerConnection({ iceServers });
+
+      let sessionId = null;
+      const queuedCandidates = [];
+
+      // Create data channel for parameters
+      dataChannel = pc.createDataChannel("parameters", { ordered: true });
+
+      dataChannel.onopen = () => {
+        statusEl.textContent = "Connected - Streaming";
+        statusEl.className = "connected";
+        console.log("✅ Data channel open - sending pipeline_ids");
+
+        // Send pipeline_ids immediately on open
+        dataChannel.send(JSON.stringify({
+          pipeline_ids: ["text-display"],
+          input_mode: "text",
+          text: textInput.value,
+          text_r: parseFloat(redSlider.value),
+          text_g: parseFloat(greenSlider.value),
+          text_b: parseFloat(blueSlider.value),
+          bg_opacity: parseFloat(bgSlider.value)
+        }));
+      };
+
+      dataChannel.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+        if (data.type === "stream_stopped") {
+          statusEl.textContent = "Stream stopped: " + (data.error_message || "Unknown error");
+          statusEl.className = "error";
+          pc.close();
+        }
+      };
+
+      // Add video transceiver (receive-only mode)
+      pc.addTransceiver("video");
+
+      // Handle incoming video track
+      pc.ontrack = (event) => {
+        if (event.streams && event.streams[0]) {
+          videoEl.srcObject = event.streams[0];
+          trackFPS();
+        }
+      };
+
+      pc.onconnectionstatechange = () => {
+        if (pc.connectionState === "connected") {
+          statusEl.textContent = "Connected - Streaming";
+          statusEl.className = "connected";
+        } else if (pc.connectionState === "failed" || pc.connectionState === "disconnected") {
+          statusEl.textContent = "Disconnected";
+          statusEl.className = "error";
+        }
+      };
+
+      // Send ICE candidates as they arrive
+      pc.onicecandidate = async (event) => {
+        if (event.candidate) {
+          if (sessionId) {
+            await fetch(`${API_BASE}/api/v1/webrtc/offer/${sessionId}`, {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                candidates: [{
+                  candidate: event.candidate.candidate,
+                  sdpMid: event.candidate.sdpMid,
+                  sdpMLineIndex: event.candidate.sdpMLineIndex
+                }]
+              })
+            });
+          } else {
+            queuedCandidates.push(event.candidate);
+          }
+        }
+      };
+
+      // Create and send offer with initial parameters
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+
+      const initialParams = {
+        pipeline_ids: ["text-display"],
+        input_mode: "text",
+        text: textInput.value,
+        text_r: parseFloat(redSlider.value),
+        text_g: parseFloat(greenSlider.value),
+        text_b: parseFloat(blueSlider.value),
+        bg_opacity: parseFloat(bgSlider.value)
+      };
+
+      const sdpResponse = await fetch(`${API_BASE}/api/v1/webrtc/offer`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sdp: pc.localDescription.sdp,
+          type: pc.localDescription.type,
+          initialParameters: initialParams
+        })
+      });
+
+      const answer = await sdpResponse.json();
+      sessionId = answer.sessionId;
+
+      await pc.setRemoteDescription({
+        type: answer.type,
+        sdp: answer.sdp
+      });
+
+      // Send queued ICE candidates
+      if (queuedCandidates.length > 0) {
+        await fetch(`${API_BASE}/api/v1/webrtc/offer/${sessionId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            candidates: queuedCandidates.map(c => ({
+              candidate: c.candidate,
+              sdpMid: c.sdpMid,
+              sdpMLineIndex: c.sdpMLineIndex
+            }))
+          })
+        });
+      }
+
+      return pc;
+    }
+
+    let activePC = null;
+
+    async function connect() {
+      // Close any existing connection
+      if (activePC) {
+        activePC.close();
+        activePC = null;
+      }
+
+      const port = serverPortInput.value.trim() || "8000";
+      API_BASE = `http://localhost:${port}`;
+      connectBtn.disabled = true;
+      connectBtn.textContent = "Connecting...";
+
+      try {
+        updateDisplays();
+        await loadPipeline();
+        activePC = await startStream();
+        connectBtn.textContent = "Reconnect";
+      } catch (error) {
+        let msg = error.message;
+        if (error instanceof TypeError && msg.includes("fetch")) {
+          msg = `Cannot reach Scope on port ${port} — is Scope running? (uv run daydream-scope)`;
+        } else if (msg.includes("Pipeline failed")) {
+          msg = "Pipeline failed to load — is the text-display plugin installed?";
+        }
+        statusEl.textContent = "⚠️ " + msg;
+        statusEl.className = "error";
+        console.error(error);
+        connectBtn.textContent = "Connect";
+      } finally {
+        connectBtn.disabled = false;
+      }
+    }
+
+    connectBtn.addEventListener("click", connect);
+
+    // Initialize displays on load
+    updateDisplays();
+  </script>
+</body>
+</html>
