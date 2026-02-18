@@ -55,6 +55,12 @@ async def index():
     return HTMLResponse(html)
 
 
+@app.get("/viewer")
+async def viewer():
+    html = (Path(__file__).parent / "viewer.html").read_text()
+    return HTMLResponse(html)
+
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()

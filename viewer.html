@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Scope Viewer</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #000; width: 100vw; height: 100vh; overflow: hidden; }
+    video { width: 100%; height: 100%; object-fit: contain; display: block; }
+    #status {
+      position: fixed; bottom: 10px; right: 12px;
+      font-family: monospace; font-size: 11px; color: #444;
+      pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+  <video id="video" autoplay muted playsinline></video>
+  <div id="status">connecting...</div>
+
+  <script>
+    // Read ?scope= param — defaults to localhost:8000
+    // In TouchDesigner Web Render TOP, set URL to:
+    //   http://localhost:8080/viewer                          (local)
+    //   https://abc-8080.proxy.runpod.net/viewer?scope=abc-8000.proxy.runpod.net  (RunPod)
+    const params = new URLSearchParams(location.search);
+    const scopeHost = params.get("scope") || "localhost:8000";
+    const httpProto = location.protocol === "https:" ? "https" : "http";
+    const API_BASE  = `${httpProto}://${scopeHost}`;
+
+    const videoEl  = document.getElementById("video");
+    const statusEl = document.getElementById("status");
+
+    let dataChannel = null;
+    let pendingParams = {};
+    let sendTimer = null;
+
+    // Batch and throttle param sends to Scope (60fps cap)
+    function scheduleSend() {
+      if (sendTimer) return;
+      sendTimer = setTimeout(() => {
+        sendTimer = null;
+        if (dataChannel && dataChannel.readyState === "open" && Object.keys(pendingParams).length) {
+          dataChannel.send(JSON.stringify(pendingParams));
+          pendingParams = {};
+        }
+      }, 16);
+    }
+
+    // WebSocket — receives OSC parameter updates from server.py
+    function connectWebSocket() {
+      const wsProto = location.protocol === "https:" ? "wss" : "ws";
+      const ws = new WebSocket(`${wsProto}://${location.host}/ws`);
+
+      ws.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+        if (data._mapped === false) return; // ignore unmapped OSC
+        // Queue all mapped params for next send
+        Object.entries(data)
+          .filter(([k]) => !k.startsWith("_"))
+          .forEach(([k, v]) => { pendingParams[k] = v; });
+        scheduleSend();
+      };
+
+      ws.onclose = () => setTimeout(connectWebSocket, 2000);
+    }
+
+    connectWebSocket();
+
+    // Connect to Scope and start streaming
+    async function start() {
+      try {
+        statusEl.textContent = "loading pipeline...";
+
+        await fetch(`${API_BASE}/api/v1/pipeline/load`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ pipeline_ids: ["text-display"] })
+        });
+
+        while (true) {
+          const r = await fetch(`${API_BASE}/api/v1/pipeline/status`);
+          const { status } = await r.json();
+          if (status === "loaded") break;
+          if (status === "error") throw new Error("Pipeline failed to load");
+          await new Promise(r => setTimeout(r, 500));
+        }
+
+        statusEl.textContent = "connecting WebRTC...";
+
+        const iceRes  = await fetch(`${API_BASE}/api/v1/webrtc/ice-servers`);
+        const { iceServers } = await iceRes.json();
+        const pc = new RTCPeerConnection({ iceServers });
+
+        dataChannel = pc.createDataChannel("parameters", { ordered: true });
+        dataChannel.onopen = () => {
+          statusEl.textContent = "";
+          dataChannel.send(JSON.stringify({
+            pipeline_ids: ["text-display"],
+            input_mode: "text",
+          }));
+        };
+
+        dataChannel.onmessage = (event) => {
+          const data = JSON.parse(event.data);
+          if (data.type === "stream_stopped") {
+            statusEl.textContent = "stream stopped";
+            pc.close();
+            setTimeout(start, 3000); // auto-reconnect
+          }
+        };
+
+        pc.addTransceiver("video");
+        pc.ontrack = (event) => {
+          if (event.streams?.[0]) videoEl.srcObject = event.streams[0];
+        };
+
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+
+        let sessionId = null;
+        const queued = [];
+
+        pc.onicecandidate = async (event) => {
+          if (!event.candidate) return;
+          if (sessionId) {
+            await fetch(`${API_BASE}/api/v1/webrtc/offer/${sessionId}`, {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ candidates: [{
+                candidate: event.candidate.candidate,
+                sdpMid: event.candidate.sdpMid,
+                sdpMLineIndex: event.candidate.sdpMLineIndex
+              }]})
+            });
+          } else {
+            queued.push(event.candidate);
+          }
+        };
+
+        const sdpRes = await fetch(`${API_BASE}/api/v1/webrtc/offer`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            sdp: pc.localDescription.sdp,
+            type: pc.localDescription.type,
+            initialParameters: { pipeline_ids: ["text-display"], input_mode: "text" }
+          })
+        });
+
+        const answer = await sdpRes.json();
+        sessionId = answer.sessionId;
+        await pc.setRemoteDescription({ type: answer.type, sdp: answer.sdp });
+
+        if (queued.length) {
+          await fetch(`${API_BASE}/api/v1/webrtc/offer/${sessionId}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ candidates: queued.map(c => ({
+              candidate: c.candidate, sdpMid: c.sdpMid, sdpMLineIndex: c.sdpMLineIndex
+            }))})
+          });
+        }
+
+        pc.onconnectionstatechange = () => {
+          if (pc.connectionState === "failed" || pc.connectionState === "disconnected") {
+            statusEl.textContent = "reconnecting...";
+            pc.close();
+            setTimeout(start, 2000);
+          }
+        };
+
+      } catch (e) {
+        statusEl.textContent = `error: ${e.message}`;
+        setTimeout(start, 3000);
+      }
+    }
+
+    start();
+  </script>
+</body>
+</html>
