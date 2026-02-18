@@ -108,6 +108,7 @@ async def proxy_scope(path: str, request: Request):
     print(f"[PROXY] {request.method} {url} → {resp.status_code}")
 
     resp_headers = {k: v for k, v in resp.headers.items() if k.lower() not in _SKIP_HEADERS}
+    resp_headers["cache-control"] = "no-store"
     return Response(
         content=resp.content,
         status_code=resp.status_code,
