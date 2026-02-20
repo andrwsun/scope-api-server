@@ -98,6 +98,20 @@ Then type messages like:
 
 ---
 
+## Stopping the servers
+
+```bash
+# Stop the bridge server (port 8080)
+lsof -ti :8080 | xargs kill -9
+
+# Stop Scope (port 8000)
+lsof -ti :8000 | xargs kill -9
+```
+
+Or just hit `Ctrl+C` in whichever Terminal window is running them.
+
+---
+
 ## Changing ports (if you have a conflict)
 
 ```bash
