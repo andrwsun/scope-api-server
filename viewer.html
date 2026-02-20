@@ -17,10 +17,21 @@
       font-family: monospace; font-size: 11px; color: #444;
       pointer-events: none;
     }
+    #webcam-ctrl {
+      position: fixed; top: 10px; right: 12px;
+      font-family: monospace; font-size: 10px;
+      background: transparent; border: 1px solid #2a2a2a; color: #2a2a2a;
+      padding: 3px 8px; border-radius: 3px; cursor: pointer;
+      width: auto; transition: color 0.2s, border-color 0.2s;
+    }
+    #webcam-ctrl:hover { border-color: #555; color: #555; }
+    #webcam-ctrl.active { border-color: #00ff88; color: #00ff88; }
+    #webcam-ctrl.error { border-color: #ff4444; color: #ff4444; }
   </style>
 </head>
 <body>
   <video id="video" autoplay muted playsinline></video>
+  <button id="webcam-ctrl" title="Toggle webcam as pipeline video input">CAM</button>
   <div id="status">connecting...</div>
   <div id="info"></div>
 
@@ -32,9 +43,10 @@
     const scopeParam = new URLSearchParams(location.search).get("scope");
     const API_BASE = "";
 
-    const videoEl  = document.getElementById("video");
-    const statusEl = document.getElementById("status");
-    const infoEl   = document.getElementById("info");
+    const videoEl    = document.getElementById("video");
+    const statusEl   = document.getElementById("status");
+    const infoEl     = document.getElementById("info");
+    const webcamCtrl = document.getElementById("webcam-ctrl");
 
     // Build the connection label: "local" or "runpod · <podId>"
     function connectionLabel() {
@@ -51,6 +63,12 @@
     let pendingParams = {};
     let sendTimer = null;
     let lastKnownParams = {}; // persisted across data channel open/close
+
+    // Active peer connection — tracked so webcam toggle can close and restart it
+    let _activePc = null;
+
+    // Webcam stream — if non-null, its video track is added to the WebRTC offer
+    let _webcamStream = null;
 
     // FPS counter via requestVideoFrameCallback
     let _frameCount = 0, _fpsTime = performance.now();
@@ -112,7 +130,8 @@
 
     connectWebSocket();
 
-    // Connect to Scope and start streaming
+    // Connect to Scope and start streaming.
+    // If _webcamStream is set, its video track is included in the offer as pipeline input.
     async function start() {
       try {
         // If ?scope= was given, configure the bridge server to proxy there
@@ -146,6 +165,14 @@
         const iceRes  = await fetch(`${API_BASE}/api/v1/webrtc/ice-servers`, { cache: "no-store" });
         const { iceServers } = await iceRes.json();
         const pc = new RTCPeerConnection({ iceServers });
+        _activePc = pc;
+
+        // If webcam is active, send its video track to Scope as pipeline video input.
+        // This must happen before createOffer() so the send transceiver appears in the SDP.
+        if (_webcamStream) {
+          const videoTrack = _webcamStream.getVideoTracks()[0];
+          if (videoTrack) pc.addTrack(videoTrack, _webcamStream);
+        }
 
         dataChannel = pc.createDataChannel("parameters", { ordered: true });
         dataChannel.onopen = () => {
@@ -160,13 +187,15 @@
 
         dataChannel.onmessage = (event) => {
           const data = JSON.parse(event.data);
-          if (data.type === "stream_stopped") {
+          if (data.type === "stream_stopped" && _activePc === pc) {
             statusEl.textContent = "stream stopped";
             pc.close();
+            _activePc = null;
             setTimeout(start, 3000); // auto-reconnect
           }
         };
 
+        // Receive transceiver for Scope's output video
         pc.addTransceiver("video");
         pc.ontrack = (event) => {
           if (event.streams?.[0]) {
@@ -224,9 +253,12 @@
 
         pc.onconnectionstatechange = () => {
           if (pc.connectionState === "failed" || pc.connectionState === "disconnected") {
-            statusEl.textContent = "reconnecting...";
-            pc.close();
-            setTimeout(start, 2000);
+            if (_activePc === pc) {
+              statusEl.textContent = "reconnecting...";
+              pc.close();
+              _activePc = null;
+              setTimeout(start, 2000);
+            }
           }
         };
 
@@ -235,6 +267,35 @@
         setTimeout(start, 3000);
       }
     }
+
+    // Webcam toggle — restarts the WebRTC session so the new track state is included in the SDP offer
+    webcamCtrl.addEventListener("click", async () => {
+      if (_webcamStream) {
+        // Turn off: stop tracks, restart session without webcam
+        _webcamStream.getTracks().forEach(t => t.stop());
+        _webcamStream = null;
+        webcamCtrl.textContent = "CAM";
+        webcamCtrl.className = "";
+        if (_activePc) { _activePc.close(); _activePc = null; }
+        start();
+      } else {
+        // Turn on: request permission, then restart session with webcam track
+        try {
+          webcamCtrl.textContent = "CAM...";
+          _webcamStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+          webcamCtrl.textContent = "CAM ●";
+          webcamCtrl.className = "active";
+          if (_activePc) { _activePc.close(); _activePc = null; }
+          start();
+        } catch (e) {
+          // Permission denied or no camera
+          webcamCtrl.textContent = "CAM ✕";
+          webcamCtrl.className = "error";
+          setTimeout(() => { webcamCtrl.textContent = "CAM"; webcamCtrl.className = ""; }, 3000);
+          _webcamStream = null;
+        }
+      }
+    });
 
     start();
   </script>
