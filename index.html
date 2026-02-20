@@ -288,6 +288,15 @@
     </div>
 
     <div class="control-group">
+      <label style="display:flex; justify-content:space-between; align-items:center;">
+        Video Input
+        <span id="webcamInfo" style="font-size:10px; color:#555; font-weight:400; text-transform:none; letter-spacing:0;">sends webcam to Scope as input</span>
+      </label>
+      <button id="webcamBtn" style="background:#333; color:#aaa; border:1px solid #555;">Webcam: OFF</button>
+      <video id="webcamPreview" autoplay muted playsinline style="display:none; width:100%; margin-top:8px; border-radius:4px; border:1px solid #333;"></video>
+    </div>
+
+    <div class="control-group">
       <button id="autoBtn" style="background:#333; color:#aaa; border:1px solid #555;">Auto-update: OFF</button>
     </div>
 
@@ -702,6 +711,102 @@
     }
 
     connectBtn.addEventListener("click", connect);
+
+    // --- Webcam → Scope WebRTC input ---
+    const webcamBtn     = document.getElementById("webcamBtn");
+    const webcamPreview = document.getElementById("webcamPreview");
+    let _webcamStream   = null;
+    let _webcamPc       = null;
+
+    async function _startWebcamRTC() {
+      if (!_webcamStream) return;
+      try {
+        const iceRes = await fetch("/api/v1/webrtc/ice-servers", { cache: "no-store" });
+        const { iceServers } = await iceRes.json();
+        const pc = new RTCPeerConnection({ iceServers });
+        _webcamPc = pc;
+
+        // Send our webcam video to Scope as pipeline input
+        pc.addTrack(_webcamStream.getVideoTracks()[0], _webcamStream);
+        // Accept Scope's output (required for SDP negotiation) — assign to hidden element
+        const sinkEl = document.createElement("video");
+        sinkEl.autoplay = true; sinkEl.muted = true;
+        pc.addTransceiver("video");
+        pc.ontrack = (e) => { if (e.streams?.[0]) sinkEl.srcObject = e.streams[0]; };
+
+        const dc = pc.createDataChannel("parameters", { ordered: true });
+
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+
+        const queued = [];
+        let sessionId = null;
+        pc.onicecandidate = async (ev) => {
+          if (!ev.candidate) return;
+          if (sessionId) {
+            await fetch(`/api/v1/webrtc/offer/${sessionId}`, {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ candidates: [{ candidate: ev.candidate.candidate, sdpMid: ev.candidate.sdpMid, sdpMLineIndex: ev.candidate.sdpMLineIndex }] })
+            });
+          } else queued.push(ev.candidate);
+        };
+
+        const sdpRes = await fetch("/api/v1/webrtc/offer", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sdp: pc.localDescription.sdp, type: pc.localDescription.type, initialParameters: {} })
+        });
+        const answer = await sdpRes.json();
+        sessionId = answer.sessionId;
+        await pc.setRemoteDescription({ type: answer.type, sdp: answer.sdp });
+
+        if (queued.length) {
+          await fetch(`/api/v1/webrtc/offer/${sessionId}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ candidates: queued.map(c => ({ candidate: c.candidate, sdpMid: c.sdpMid, sdpMLineIndex: c.sdpMLineIndex })) })
+          });
+        }
+
+        pc.onconnectionstatechange = () => {
+          if ((pc.connectionState === "failed" || pc.connectionState === "disconnected") && _webcamStream) {
+            pc.close(); _webcamPc = null;
+            setTimeout(_startWebcamRTC, 2000); // auto-reconnect
+          }
+        };
+      } catch (e) {
+        console.error("[Webcam RTC]", e);
+        setTimeout(_startWebcamRTC, 3000);
+      }
+    }
+
+    webcamBtn.addEventListener("click", async () => {
+      if (_webcamStream) {
+        // Turn off
+        _webcamStream.getTracks().forEach(t => t.stop());
+        _webcamStream = null;
+        if (_webcamPc) { _webcamPc.close(); _webcamPc = null; }
+        webcamPreview.srcObject = null;
+        webcamPreview.style.display = "none";
+        webcamBtn.textContent = "Webcam: OFF";
+        webcamBtn.style.background = "#333"; webcamBtn.style.color = "#aaa"; webcamBtn.style.border = "1px solid #555";
+      } else {
+        // Turn on
+        try {
+          webcamBtn.textContent = "Webcam: starting...";
+          _webcamStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+          webcamPreview.srcObject = _webcamStream;
+          webcamPreview.style.display = "block";
+          webcamBtn.textContent = "Webcam: ON";
+          webcamBtn.style.background = "#00ff88"; webcamBtn.style.color = "#000"; webcamBtn.style.border = "none";
+          _startWebcamRTC();
+        } catch (e) {
+          webcamBtn.textContent = "Webcam: permission denied";
+          _webcamStream = null;
+        }
+      }
+    });
 
     // Initialize displays on load
     updateDisplays();
