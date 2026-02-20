@@ -224,6 +224,20 @@
       </div>
     </div>
 
+    <!-- passthrough / NDI controls -->
+    <div id="ui-passthrough" style="display:none;">
+      <div class="control-group">
+        <label style="display:flex; justify-content:space-between; align-items:center;">
+          NDI Source
+          <button id="ndiRefreshBtn" style="width:auto;padding:4px 10px;font-size:11px;background:#333;color:#aaa;border:1px solid #555;">Refresh</button>
+        </label>
+        <select id="ndiSelect" style="width:100%;padding:10px;background:#222;border:1px solid #333;border-radius:4px;color:#fff;font-size:13px;">
+          <option value="">— click Refresh to scan —</option>
+        </select>
+        <div id="ndiStatus" style="margin-top:6px;font-size:11px;color:#555;font-family:monospace;"></div>
+      </div>
+    </div>
+
     <!-- text-display controls -->
     <div id="ui-text-display" style="display:none;">
       <div class="control-group">
@@ -359,10 +373,40 @@
     function updatePipelineUI() {
       const v = pipelineSelect.value;
       document.getElementById("ui-longlive").style.display    = v === "longlive"     ? "" : "none";
+      document.getElementById("ui-passthrough").style.display  = v === "passthrough"  ? "" : "none";
       document.getElementById("ui-text-display").style.display = v === "text-display" ? "" : "none";
     }
     pipelineSelect.addEventListener("change", updatePipelineUI);
     updatePipelineUI();
+
+    // --- NDI source picker ---
+    const ndiSelect   = document.getElementById("ndiSelect");
+    const ndiStatus   = document.getElementById("ndiStatus");
+    const ndiRefreshBtn = document.getElementById("ndiRefreshBtn");
+
+    async function refreshNDISources() {
+      ndiRefreshBtn.textContent = "Scanning...";
+      ndiRefreshBtn.disabled = true;
+      ndiStatus.textContent = "Scanning for NDI sources (5s)…";
+      try {
+        const r = await fetch("/api/v1/input-sources/ndi/sources?timeout_ms=5000", { cache: "no-store" });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const { sources } = await r.json();
+        ndiSelect.innerHTML = sources.length
+          ? sources.map(s => `<option value="${s.identifier}">${s.name}</option>`).join("")
+          : `<option value="">No NDI sources found</option>`;
+        ndiStatus.textContent = sources.length ? `${sources.length} source(s) found` : "No sources found — is NDI Out active?";
+        ndiStatus.style.color = sources.length ? "#00ff88" : "#ff9900";
+      } catch (e) {
+        ndiStatus.textContent = `Error: ${e.message}`;
+        ndiStatus.style.color = "#ff4444";
+      } finally {
+        ndiRefreshBtn.textContent = "Refresh";
+        ndiRefreshBtn.disabled = false;
+      }
+    }
+
+    ndiRefreshBtn.addEventListener("click", refreshNDISources);
 
     const SEND_INTERVAL_MS = 1000 / 60; // 60fps cap
     let lastSendTime = 0;
@@ -538,9 +582,12 @@
         prompts: [{ text: promptInput.value, weight: 100 }],
         prompt_interpolation_method: "linear",
         denoising_step_list: [1000, 750, 500, 250]
-      } : pipeline === "passthrough" ? {
-        pipeline_ids: ["passthrough"]
-      } : {
+      } : pipeline === "passthrough" ? (() => {
+        const p = { pipeline_ids: ["passthrough"] };
+        const ndiId = ndiSelect.value;
+        if (ndiId) p.input_source = { source_type: "ndi", source_name: ndiId, enabled: true };
+        return p;
+      })() : {
         pipeline_ids: ["text-display"],
         text: textInput.value,
         text_r: parseFloat(redSlider.value),
