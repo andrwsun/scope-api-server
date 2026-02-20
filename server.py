@@ -92,6 +92,12 @@ async def config_scope(body: dict):
     return {"host": _scope_host}
 
 
+@app.get("/params")
+async def get_params():
+    """Return the last known parameter state sent to Scope."""
+    return _last_broadcast
+
+
 @app.post("/broadcast")
 async def broadcast_params(body: dict):
     """Push parameter updates from the control UI to all connected browser clients.

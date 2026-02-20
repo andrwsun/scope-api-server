@@ -18,6 +18,7 @@
       display: flex;
       justify-content: center;
       min-height: 100vh;
+      align-items: flex-start;
     }
 
     #controls {
@@ -205,6 +206,7 @@
       <label>Pipeline</label>
       <select id="pipelineSelect" style="width:100%;padding:10px;background:#222;border:1px solid #333;border-radius:4px;color:#fff;font-size:14px;">
         <option value="longlive">longlive</option>
+        <option value="passthrough">passthrough</option>
         <option value="text-display">text-display</option>
       </select>
     </div>
@@ -305,6 +307,31 @@
     </div>
   </div>
 
+  <!-- Right-side params panel -->
+  <div id="params-panel" style="
+    width: 320px;
+    background: #0d0d0d;
+    border-left: 1px solid #222;
+    padding: 20px;
+    font-family: monospace;
+    font-size: 12px;
+    overflow-y: auto;
+    flex-shrink: 0;
+  ">
+    <div style="color:#555; font-size:11px; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:12px; display:flex; justify-content:space-between; align-items:center;">
+      Current Params
+      <span id="paramsAge" style="font-size:10px; color:#333;">—</span>
+    </div>
+    <pre id="paramsDisplay" style="
+      color: #00ff88;
+      white-space: pre-wrap;
+      word-break: break-all;
+      margin: 0;
+      line-height: 1.6;
+    ">waiting...</pre>
+
+  </div>
+
   <script>
     let API_BASE = "http://localhost:8000";
     const statusEl = document.getElementById("status");
@@ -330,9 +357,9 @@
     const promptInput = document.getElementById("promptInput");
 
     function updatePipelineUI() {
-      const isLonglive = pipelineSelect.value === "longlive";
-      document.getElementById("ui-longlive").style.display    = isLonglive ? "" : "none";
-      document.getElementById("ui-text-display").style.display = isLonglive ? "none" : "";
+      const v = pipelineSelect.value;
+      document.getElementById("ui-longlive").style.display    = v === "longlive"     ? "" : "none";
+      document.getElementById("ui-text-display").style.display = v === "text-display" ? "" : "none";
     }
     pipelineSelect.addEventListener("change", updatePipelineUI);
     updatePipelineUI();
@@ -421,8 +448,8 @@
         // Only apply params relevant to the currently selected pipeline.
         // This prevents /text OSC from triggering a longlive resend (and vice versa).
         if (data._mapped !== false) {
-          const isLL = pipelineSelect.value === "longlive";
-          if (!isLL) {
+          const pipeline = pipelineSelect.value;
+          if (pipeline === "text-display") {
             // text-display params
             let changed = false;
             if (data.text !== undefined)       { textInput.value   = data.text;              changed = true; }
@@ -435,13 +462,14 @@
               clearTimeout(oscBatchTimer);
               oscBatchTimer = setTimeout(sendParameters, 16);
             }
-          } else {
+          } else if (pipeline === "longlive") {
             // longlive params — update prompt input if /prompt OSC came in
             if (data.prompts?.[0]?.text !== undefined) {
               promptInput.value = data.prompts[0].text;
               // No need to resend — viewer's data channel already got it from server
             }
           }
+          // passthrough: no params to update
         }
 
         logOSC(data);
@@ -504,12 +532,14 @@
       if (now - lastSendTime < SEND_INTERVAL_MS) return;
       lastSendTime = now;
 
-      const isLonglive = pipelineSelect.value === "longlive";
-      const params = isLonglive ? {
+      const pipeline = pipelineSelect.value;
+      const params = pipeline === "longlive" ? {
         pipeline_ids: ["longlive"],
         prompts: [{ text: promptInput.value, weight: 100 }],
         prompt_interpolation_method: "linear",
         denoising_step_list: [1000, 750, 500, 250]
+      } : pipeline === "passthrough" ? {
+        pipeline_ids: ["passthrough"]
       } : {
         pipeline_ids: ["text-display"],
         text: textInput.value,
@@ -648,6 +678,33 @@
       }
     }
     setInterval(pollScopeStatus, 2000);
+
+    // Poll /params and display in right panel
+    const paramsDisplay = document.getElementById("paramsDisplay");
+    const paramsAge = document.getElementById("paramsAge");
+    let lastParamsUpdate = null;
+
+    async function pollParams() {
+      try {
+        const r = await fetch("/params", { cache: "no-store" });
+        if (!r.ok) return;
+        const d = await r.json();
+        paramsDisplay.textContent = JSON.stringify(d, null, 2);
+        lastParamsUpdate = Date.now();
+      } catch (_) {}
+
+    }
+
+    // Update the age display every second
+    setInterval(() => {
+      if (lastParamsUpdate) {
+        const s = Math.round((Date.now() - lastParamsUpdate) / 1000);
+        paramsAge.textContent = s === 0 ? "just now" : `${s}s ago`;
+      }
+    }, 1000);
+
+    setInterval(pollParams, 2000);
+    pollParams();
   </script>
 </body>
 </html>
