@@ -50,6 +50,7 @@
     let dataChannel = null;
     let pendingParams = {};
     let sendTimer = null;
+    let lastKnownParams = {}; // persisted across data channel open/close
 
     // FPS counter via requestVideoFrameCallback
     let _frameCount = 0, _fpsTime = performance.now();
@@ -90,10 +91,19 @@
       ws.onmessage = (event) => {
         const data = JSON.parse(event.data);
         if (data._mapped === false) return; // ignore unmapped OSC
-        // Queue all mapped params for next send
+        const params = {};
         Object.entries(data)
           .filter(([k]) => !k.startsWith("_"))
-          .forEach(([k, v]) => { pendingParams[k] = v; });
+          .forEach(([k, v]) => { params[k] = v; });
+        // If pipeline_ids is present this is a full pipeline broadcast — replace
+        // lastKnownParams entirely so stale params from the previous pipeline
+        // don't bleed into the new session.
+        if (params.pipeline_ids) {
+          lastKnownParams = params;
+        } else {
+          Object.assign(lastKnownParams, params);
+        }
+        Object.assign(pendingParams, params);
         scheduleSend();
       };
 
@@ -114,20 +124,21 @@
           }).catch(() => {});
         }
 
-        statusEl.textContent = "loading pipeline...";
-
-        await fetch(`${API_BASE}/api/v1/pipeline/load`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ pipeline_ids: ["text-display"] })
-        });
-
+        // Wait for the control UI to load a pipeline — don't override it here
+        statusEl.textContent = "waiting for pipeline...";
         while (true) {
-          const r = await fetch(`${API_BASE}/api/v1/pipeline/status`, { cache: "no-store" });
-          const { status } = await r.json();
-          if (status === "loaded") break;
-          if (status === "error") throw new Error("Pipeline failed to load");
-          await new Promise(r => setTimeout(r, 500));
+          try {
+            const r = await fetch(`${API_BASE}/api/v1/pipeline/status`, { cache: "no-store" });
+            if (r.ok) {
+              const { status } = await r.json();
+              if (status === "loaded") break;
+              if (status === "error") { statusEl.textContent = "pipeline error"; }
+            }
+            // else: proxy not configured yet or Scope unreachable — keep retrying silently
+          } catch (_) {
+            // JSON parse error or network error — keep retrying silently
+          }
+          await new Promise(r => setTimeout(r, 2000));
         }
 
         statusEl.textContent = "connecting WebRTC...";
@@ -140,10 +151,11 @@
         dataChannel.onopen = () => {
           statusEl.textContent = "";
           infoEl.textContent = connectionLabel();
-          dataChannel.send(JSON.stringify({
-            pipeline_ids: ["text-display"],
-            input_mode: "text",
-          }));
+          // Replay last known params — the broadcast replay from server.py arrives
+          // before the data channel exists, so params would otherwise be dropped.
+          if (Object.keys(lastKnownParams).length) {
+            dataChannel.send(JSON.stringify(lastKnownParams));
+          }
         };
 
         dataChannel.onmessage = (event) => {
@@ -192,7 +204,7 @@
           body: JSON.stringify({
             sdp: pc.localDescription.sdp,
             type: pc.localDescription.type,
-            initialParameters: { pipeline_ids: ["text-display"], input_mode: "text" }
+            initialParameters: lastKnownParams
           })
         });
 

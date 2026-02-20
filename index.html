@@ -190,7 +190,7 @@
 </head>
 <body>
   <div id="controls">
-    <h1>🎨 Text Display Control</h1>
+    <h1>🎨 Scope Control</h1>
 
     <div class="control-group">
       <label>Scope Server</label>
@@ -201,48 +201,70 @@
       <div class="port-note">Local: <code>localhost:8000</code> · RunPod: <code>abc123-8000.proxy.runpod.net</code></div>
     </div>
 
+    <div class="control-group">
+      <label>Pipeline</label>
+      <select id="pipelineSelect" style="width:100%;padding:10px;background:#222;border:1px solid #333;border-radius:4px;color:#fff;font-size:14px;">
+        <option value="longlive">longlive</option>
+        <option value="text-display">text-display</option>
+      </select>
+    </div>
+
     <div id="status">Not connected</div>
 
-    <div class="control-group">
-      <label>Text Message</label>
-      <input type="text" id="textInput" value="Hello Scope!" placeholder="Enter text...">
+    <!-- longlive controls -->
+    <div id="ui-longlive">
+      <div class="control-group">
+        <label>Prompt</label>
+        <input type="text" id="promptInput" placeholder="Enter prompt...">
+      </div>
+      <div class="control-group">
+        <button id="resetCacheBtn" style="background:#333;color:#aaa;border:1px solid #555;">Reset Cache</button>
+      </div>
     </div>
 
-    <div class="control-group">
-      <label>
-        Text Red
-        <span class="slider-value" id="redValue">1.00</span>
-      </label>
-      <input type="range" id="redSlider" min="0" max="1" step="0.01" value="1">
-    </div>
+    <!-- text-display controls -->
+    <div id="ui-text-display" style="display:none;">
+      <div class="control-group">
+        <label>Text Message</label>
+        <input type="text" id="textInput" value="Hello Scope!" placeholder="Enter text...">
+      </div>
 
-    <div class="control-group">
-      <label>
-        Text Green
-        <span class="slider-value" id="greenValue">1.00</span>
-      </label>
-      <input type="range" id="greenSlider" min="0" max="1" step="0.01" value="1">
-    </div>
+      <div class="control-group">
+        <label>
+          Text Red
+          <span class="slider-value" id="redValue">1.00</span>
+        </label>
+        <input type="range" id="redSlider" min="0" max="1" step="0.01" value="1">
+      </div>
 
-    <div class="control-group">
-      <label>
-        Text Blue
-        <span class="slider-value" id="blueValue">1.00</span>
-      </label>
-      <input type="range" id="blueSlider" min="0" max="1" step="0.01" value="1">
-    </div>
+      <div class="control-group">
+        <label>
+          Text Green
+          <span class="slider-value" id="greenValue">1.00</span>
+        </label>
+        <input type="range" id="greenSlider" min="0" max="1" step="0.01" value="1">
+      </div>
 
-    <div class="control-group">
-      <label>Color Preview</label>
-      <div class="color-preview" id="colorPreview"></div>
-    </div>
+      <div class="control-group">
+        <label>
+          Text Blue
+          <span class="slider-value" id="blueValue">1.00</span>
+        </label>
+        <input type="range" id="blueSlider" min="0" max="1" step="0.01" value="1">
+      </div>
 
-    <div class="control-group">
-      <label>
-        Background Opacity
-        <span class="slider-value" id="bgValue">0.00</span>
-      </label>
-      <input type="range" id="bgSlider" min="0" max="1" step="0.01" value="0">
+      <div class="control-group">
+        <label>Color Preview</label>
+        <div class="color-preview" id="colorPreview"></div>
+      </div>
+
+      <div class="control-group">
+        <label>
+          Background Opacity
+          <span class="slider-value" id="bgValue">0.00</span>
+        </label>
+        <input type="range" id="bgSlider" min="0" max="1" step="0.01" value="0">
+      </div>
     </div>
 
     <div class="control-group">
@@ -251,6 +273,10 @@
 
     <div class="control-group">
       <button id="autoBtn" style="background:#333; color:#aaa; border:1px solid #555;">Auto-update: OFF</button>
+    </div>
+
+    <div id="scopeStatus" style="padding:8px 10px;background:#111;border:1px solid #222;border-radius:4px;font-family:monospace;font-size:11px;color:#555;">
+      Scope: —
     </div>
 
     <div style="margin-top:20px;">
@@ -300,7 +326,17 @@
     const blueValue = document.getElementById("blueValue");
     const bgValue = document.getElementById("bgValue");
 
-    let dataChannel = null;
+    const pipelineSelect = document.getElementById("pipelineSelect");
+    const promptInput = document.getElementById("promptInput");
+
+    function updatePipelineUI() {
+      const isLonglive = pipelineSelect.value === "longlive";
+      document.getElementById("ui-longlive").style.display    = isLonglive ? "" : "none";
+      document.getElementById("ui-text-display").style.display = isLonglive ? "none" : "";
+    }
+    pipelineSelect.addEventListener("change", updatePipelineUI);
+    updatePipelineUI();
+
     const SEND_INTERVAL_MS = 1000 / 60; // 60fps cap
     let lastSendTime = 0;
     let oscBatchTimer = null; // batches rapid OSC bursts into one Scope update
@@ -342,10 +378,11 @@
       } else {
         // Valid mapped address — strip internal _mapped key
         type = "mapped";
+        const fmt = v => typeof v === "number" ? v.toFixed(3) : typeof v === "object" ? JSON.stringify(v) : v;
         const entries = Object.entries(data)
           .filter(([k]) => !k.startsWith("_"))
           .map(([k, v]) =>
-            `<span style="color:#00ff88">${k}</span> <span style="color:#fff">${typeof v === "number" ? v.toFixed(3) : v}</span>`
+            `<span style="color:#00ff88">${k}</span> <span style="color:#fff">${fmt(v)}</span>`
           ).join("  ");
         html = `<span style="color:#444">${time}</span>  ${entries}`;
       }
@@ -381,18 +418,30 @@
         // to avoid a feedback loop where we re-send our own updates endlessly.
         if (data._from_ui) return;
 
-        // Only apply to UI if it's a known/mapped parameter
+        // Only apply params relevant to the currently selected pipeline.
+        // This prevents /text OSC from triggering a longlive resend (and vice versa).
         if (data._mapped !== false) {
-          if (data.text !== undefined)       textInput.value   = data.text;
-          if (data.text_r !== undefined)     redSlider.value   = data.text_r;
-          if (data.text_g !== undefined)     greenSlider.value = data.text_g;
-          if (data.text_b !== undefined)     blueSlider.value  = data.text_b;
-          if (data.bg_opacity !== undefined) bgSlider.value    = data.bg_opacity;
-          updateDisplays();
-          // Batch rapid OSC bursts — wait 16ms for all params in the same
-          // script execution to arrive before sending once to Scope
-          clearTimeout(oscBatchTimer);
-          oscBatchTimer = setTimeout(sendParameters, 16);
+          const isLL = pipelineSelect.value === "longlive";
+          if (!isLL) {
+            // text-display params
+            let changed = false;
+            if (data.text !== undefined)       { textInput.value   = data.text;              changed = true; }
+            if (data.text_r !== undefined)     { redSlider.value   = data.text_r;            changed = true; }
+            if (data.text_g !== undefined)     { greenSlider.value = data.text_g;            changed = true; }
+            if (data.text_b !== undefined)     { blueSlider.value  = data.text_b;            changed = true; }
+            if (data.bg_opacity !== undefined) { bgSlider.value    = data.bg_opacity;        changed = true; }
+            if (changed) {
+              updateDisplays();
+              clearTimeout(oscBatchTimer);
+              oscBatchTimer = setTimeout(sendParameters, 16);
+            }
+          } else {
+            // longlive params — update prompt input if /prompt OSC came in
+            if (data.prompts?.[0]?.text !== undefined) {
+              promptInput.value = data.prompts[0].text;
+              // No need to resend — viewer's data channel already got it from server
+            }
+          }
         }
 
         logOSC(data);
@@ -455,7 +504,14 @@
       if (now - lastSendTime < SEND_INTERVAL_MS) return;
       lastSendTime = now;
 
-      const params = {
+      const isLonglive = pipelineSelect.value === "longlive";
+      const params = isLonglive ? {
+        pipeline_ids: ["longlive"],
+        prompts: [{ text: promptInput.value, weight: 100 }],
+        prompt_interpolation_method: "linear",
+        denoising_step_list: [1000, 750, 500, 250]
+      } : {
+        pipeline_ids: ["text-display"],
         text: textInput.value,
         text_r: parseFloat(redSlider.value),
         text_g: parseFloat(greenSlider.value),
@@ -470,10 +526,6 @@
         body: JSON.stringify(params)
       }).catch(() => {});
 
-      // Also send on local data channel if connected
-      if (dataChannel && dataChannel.readyState === "open") {
-        dataChannel.send(JSON.stringify(params));
-      }
     }
 
     // Update button click
@@ -489,15 +541,34 @@
       debounceTimer = setTimeout(sendParameters, 300);
     });
 
+    // Prompt input (longlive)
+    promptInput.addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') sendParameters();
+    });
+    promptInput.addEventListener('input', () => {
+      if (!autoUpdate) return;
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(sendParameters, 300);
+    });
+
+    document.getElementById("resetCacheBtn").addEventListener("click", () => {
+      fetch("/broadcast", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reset_cache: true })
+      }).catch(() => {});
+    });
+
     // Load pipeline and start streaming
     async function loadPipeline() {
-      statusEl.textContent = "Loading text-display pipeline...";
+      const pipelineId = pipelineSelect.value;
+      statusEl.textContent = `Loading ${pipelineId} pipeline...`;
 
       await fetch(`${API_BASE}/api/v1/pipeline/load`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          pipeline_ids: ["text-display"]
+          pipeline_ids: [pipelineId]
         })
       });
 
@@ -515,142 +586,7 @@
       statusEl.textContent = "Pipeline loaded ✓";
     }
 
-    async function startStream() {
-      statusEl.textContent = "Establishing WebRTC connection...";
-
-      // Get ICE servers
-      const iceResponse = await fetch(`${API_BASE}/api/v1/webrtc/ice-servers`, { cache: "no-store" });
-      const { iceServers } = await iceResponse.json();
-
-      // Create peer connection
-      const pc = new RTCPeerConnection({ iceServers });
-
-      let sessionId = null;
-      const queuedCandidates = [];
-
-      // Create data channel for parameters
-      dataChannel = pc.createDataChannel("parameters", { ordered: true });
-
-      dataChannel.onopen = () => {
-        statusEl.textContent = "Connected";
-        statusEl.className = "connected";
-        console.log("✅ Data channel open - sending pipeline_ids");
-
-        // Send pipeline_ids immediately on open
-        dataChannel.send(JSON.stringify({
-          pipeline_ids: ["text-display"],
-          input_mode: "text",
-          text: textInput.value,
-          text_r: parseFloat(redSlider.value),
-          text_g: parseFloat(greenSlider.value),
-          text_b: parseFloat(blueSlider.value),
-          bg_opacity: parseFloat(bgSlider.value)
-        }));
-      };
-
-      dataChannel.onmessage = (event) => {
-        const data = JSON.parse(event.data);
-        if (data.type === "stream_stopped") {
-          statusEl.textContent = "Stream stopped: " + (data.error_message || "Unknown error");
-          statusEl.className = "error";
-          pc.close();
-        }
-      };
-
-      pc.onconnectionstatechange = () => {
-        if (pc.connectionState === "connected") {
-          statusEl.textContent = "Connected";
-          statusEl.className = "connected";
-        } else if (pc.connectionState === "failed" || pc.connectionState === "disconnected") {
-          statusEl.textContent = "Disconnected";
-          statusEl.className = "error";
-        }
-      };
-
-      // Send ICE candidates as they arrive
-      pc.onicecandidate = async (event) => {
-        if (event.candidate) {
-          if (sessionId) {
-            await fetch(`${API_BASE}/api/v1/webrtc/offer/${sessionId}`, {
-              method: "PATCH",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                candidates: [{
-                  candidate: event.candidate.candidate,
-                  sdpMid: event.candidate.sdpMid,
-                  sdpMLineIndex: event.candidate.sdpMLineIndex
-                }]
-              })
-            });
-          } else {
-            queuedCandidates.push(event.candidate);
-          }
-        }
-      };
-
-      // Scope requires a video transceiver in the offer (returns 500 without it).
-      // We add it but don't attach to any <video> element so nothing is displayed.
-      pc.addTransceiver("video", { direction: "recvonly" });
-
-      // Create and send offer with initial parameters
-      const offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
-
-      const initialParams = {
-        pipeline_ids: ["text-display"],
-        input_mode: "text",
-        text: textInput.value,
-        text_r: parseFloat(redSlider.value),
-        text_g: parseFloat(greenSlider.value),
-        text_b: parseFloat(blueSlider.value),
-        bg_opacity: parseFloat(bgSlider.value)
-      };
-
-      const sdpResponse = await fetch(`${API_BASE}/api/v1/webrtc/offer`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          sdp: pc.localDescription.sdp,
-          type: pc.localDescription.type,
-          initialParameters: initialParams
-        })
-      });
-
-      const answer = await sdpResponse.json();
-      sessionId = answer.sessionId;
-
-      await pc.setRemoteDescription({
-        type: answer.type,
-        sdp: answer.sdp
-      });
-
-      // Send queued ICE candidates
-      if (queuedCandidates.length > 0) {
-        await fetch(`${API_BASE}/api/v1/webrtc/offer/${sessionId}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            candidates: queuedCandidates.map(c => ({
-              candidate: c.candidate,
-              sdpMid: c.sdpMid,
-              sdpMLineIndex: c.sdpMLineIndex
-            }))
-          })
-        });
-      }
-
-      return pc;
-    }
-
-    let activePC = null;
-
     async function connect() {
-      // Close any existing connection
-      if (activePC) {
-        activePC.close();
-        activePC = null;
-      }
-
       const host = serverPortInput.value.trim() || "localhost:8000";
       // Tell the server which Scope host to proxy to, then use relative URLs
       await fetch("/config/scope", {
@@ -665,14 +601,19 @@
       try {
         updateDisplays();
         await loadPipeline();
-        activePC = await startStream();
+        // Broadcast initial params so viewer's data channel picks them up
+        sendParameters();
+        statusEl.textContent = "Connected";
+        statusEl.className = "connected";
         connectBtn.textContent = "Reconnect";
+        _scopeConnected = true;
+        pollScopeStatus();
       } catch (error) {
         let msg = error.message;
         if (error instanceof TypeError && msg.includes("fetch")) {
           msg = `Cannot reach Scope at ${host} — is Scope running? (uv run daydream-scope)`;
         } else if (msg.includes("Pipeline failed")) {
-          msg = "Pipeline failed to load — is the text-display plugin installed?";
+          msg = `Pipeline failed to load — is the ${pipelineSelect.value} plugin installed?`;
         }
         statusEl.textContent = "⚠️ " + msg;
         statusEl.className = "error";
@@ -687,6 +628,26 @@
 
     // Initialize displays on load
     updateDisplays();
+
+    // Poll Scope pipeline status every 2s — only after user has connected
+    const scopeStatusEl = document.getElementById("scopeStatus");
+    let _scopeConnected = false;
+    async function pollScopeStatus() {
+      if (!_scopeConnected) return;
+      try {
+        const r = await fetch("/api/v1/pipeline/status", { cache: "no-store" });
+        if (!r.ok) { scopeStatusEl.textContent = "Scope: unreachable"; return; }
+        const d = await r.json();
+        const state = d.status ?? "unknown";
+        const pid = d.pipeline_id ?? "—";
+        const err = d.error ? ` ⚠ ${d.error}` : "";
+        const color = state === "loaded" ? "#00ff88" : state === "error" ? "#ff4444" : "#ffaa00";
+        scopeStatusEl.innerHTML = `Scope: <span style="color:${color}">${state}</span>  pipeline: <span style="color:#aaa">${pid}</span>${err}`;
+      } catch (_) {
+        scopeStatusEl.textContent = "Scope: unreachable";
+      }
+    }
+    setInterval(pollScopeStatus, 2000);
   </script>
 </body>
 </html>

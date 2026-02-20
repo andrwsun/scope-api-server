@@ -5,7 +5,7 @@
 # Parameter: /text  (string)
 # Sets the text displayed on screen.
 # Overrides whatever is typed in the browser UI prompt box.
-text_box = op('text1')
+text_box = op('text2')
 content = [str(text_box.par.text)]
 
-op('oscout2').sendOSC('/text', content)
+op('oscout2').sendOSC('/prompt', content)

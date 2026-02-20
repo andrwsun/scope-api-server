@@ -36,6 +36,7 @@ app = FastAPI()
 _clients: set[WebSocket] = set()
 _loop: asyncio.AbstractEventLoop | None = None
 _scope_host: str = os.environ.get("SCOPE_HOST", "localhost:8000")
+_last_broadcast: dict = {}  # replayed to new viewers on connect
 
 
 def _scope_url(path: str) -> str:
@@ -61,16 +62,19 @@ async def _broadcast(data: dict):
     _clients.difference_update(dead)
 
 
+_NO_CACHE = {"Cache-Control": "no-store, no-cache, must-revalidate"}
+
+
 @app.get("/")
 async def index():
     html = (Path(__file__).parent / "index.html").read_text()
-    return HTMLResponse(html)
+    return HTMLResponse(html, headers=_NO_CACHE)
 
 
 @app.get("/viewer")
 async def viewer():
     html = (Path(__file__).parent / "viewer.html").read_text()
-    return HTMLResponse(html)
+    return HTMLResponse(html, headers=_NO_CACHE)
 
 
 @app.post("/config/scope")
@@ -92,6 +96,8 @@ async def config_scope(body: dict):
 async def broadcast_params(body: dict):
     """Push parameter updates from the control UI to all connected browser clients.
     The viewer receives these and forwards them to Scope via its own data channel."""
+    global _last_broadcast
+    _last_broadcast = body  # save for new viewers that connect later
     await _broadcast({**body, "_mapped": True, "_from_ui": True})
     return {"ok": True}
 
@@ -130,6 +136,12 @@ async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
     _clients.add(websocket)
     print(f"[WS] Browser connected  ({len(_clients)} total)")
+    # Immediately replay last known state so new viewers don't wait for the next update
+    if _last_broadcast:
+        try:
+            await websocket.send_text(json.dumps({**_last_broadcast, "_mapped": True, "_from_ui": True}))
+        except Exception:
+            pass
     try:
         while True:
             await websocket.receive_text()
@@ -140,6 +152,7 @@ async def websocket_endpoint(websocket: WebSocket):
 
 # --- OSC ---
 
+# text-display params: OSC address → (param key, type)
 _PARAM_MAP = {
     "/text":       ("text",       str),
     "/text_r":     ("text_r",     float),
@@ -149,10 +162,31 @@ _PARAM_MAP = {
 }
 
 
+async def _save_and_broadcast(data: dict):
+    """Merge data into _last_broadcast and push to all WebSocket clients."""
+    global _last_broadcast
+    _last_broadcast = {**_last_broadcast, **data}
+    await _broadcast({**data, "_mapped": True})
+
+
 def _osc_handler(address: str, *args):
     if not args:
         return
     raw = args[0]
+
+    # /prompt → longlive format (TD sends a plain string on this address)
+    if address == "/prompt":
+        text = str(raw)
+        params = {
+            "pipeline_ids": ["longlive"],
+            "prompts": [{"text": text, "weight": 100}],
+            "prompt_interpolation_method": "linear",
+            "denoising_step_list": [1000, 750, 500, 250],
+        }
+        print(f"[OSC] /prompt → {text!r}")
+        if _loop:
+            asyncio.run_coroutine_threadsafe(_save_and_broadcast(params), _loop)
+        return
 
     if address not in _PARAM_MAP:
         print(f"[OSC] Received (unmapped): {address} {list(args)}")
@@ -172,7 +206,7 @@ def _osc_handler(address: str, *args):
     print(f"[OSC] {address} → {key} = {value!r}")
     if _loop:
         asyncio.run_coroutine_threadsafe(
-            _broadcast({key: value, "_mapped": True}),
+            _save_and_broadcast({key: value}),
             _loop,
         )
 
@@ -180,6 +214,7 @@ def _osc_handler(address: str, *args):
 def _run_osc_server():
     dispatcher = Dispatcher()
     dispatcher.set_default_handler(_osc_handler)
+    dispatcher.map("/prompt", _osc_handler)
     for address in _PARAM_MAP:
         dispatcher.map(address, _osc_handler)
 
