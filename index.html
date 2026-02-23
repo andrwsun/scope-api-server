@@ -205,15 +205,19 @@
     <div class="control-group">
       <label>Pipeline</label>
       <select id="pipelineSelect" style="width:100%;padding:10px;background:#222;border:1px solid #333;border-radius:4px;color:#fff;font-size:14px;">
+        <option value="streamdiffusionv2">streamdiffusionv2</option>
         <option value="longlive">longlive</option>
+        <option value="krea-realtime-video">krea-realtime-video</option>
+        <option value="reward-forcing">reward-forcing</option>
+        <option value="memflow">memflow</option>
         <option value="text-display">text-display</option>
       </select>
     </div>
 
     <div id="status">Not connected</div>
 
-    <!-- longlive controls -->
-    <div id="ui-longlive">
+    <!-- prompt-based pipeline controls (all video gen pipelines) -->
+    <div id="ui-prompt">
       <div class="control-group">
         <label>Prompt</label>
         <input type="text" id="promptInput" placeholder="Enter prompt...">
@@ -355,9 +359,11 @@
     const pipelineSelect = document.getElementById("pipelineSelect");
     const promptInput = document.getElementById("promptInput");
 
+    const PROMPT_PIPELINES = ["streamdiffusionv2", "longlive", "krea-realtime-video", "reward-forcing", "memflow"];
+
     function updatePipelineUI() {
       const v = pipelineSelect.value;
-      document.getElementById("ui-longlive").style.display    = v === "longlive"     ? "" : "none";
+      document.getElementById("ui-prompt").style.display       = PROMPT_PIPELINES.includes(v) ? "" : "none";
       document.getElementById("ui-text-display").style.display = v === "text-display" ? "" : "none";
     }
     pipelineSelect.addEventListener("change", updatePipelineUI);
@@ -461,14 +467,13 @@
               clearTimeout(oscBatchTimer);
               oscBatchTimer = setTimeout(sendParameters, 16);
             }
-          } else if (pipeline === "longlive") {
-            // longlive params — update prompt input if /prompt OSC came in
+          } else if (PROMPT_PIPELINES.includes(pipeline)) {
+            // prompt-based pipeline — update prompt input if /prompt OSC came in
             if (data.prompts?.[0]?.text !== undefined) {
               promptInput.value = data.prompts[0].text;
               // No need to resend — viewer's data channel already got it from server
             }
           }
-          // passthrough: no params to update
         }
 
         logOSC(data);
@@ -532,8 +537,8 @@
       lastSendTime = now;
 
       const pipeline = pipelineSelect.value;
-      const params = pipeline === "longlive" ? {
-        pipeline_ids: ["longlive"],
+      const params = PROMPT_PIPELINES.includes(pipeline) ? {
+        pipeline_ids: [pipeline],
         prompts: [{ text: promptInput.value, weight: 100 }],
         prompt_interpolation_method: "linear",
         denoising_step_list: [1000, 750, 500, 250]
