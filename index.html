@@ -198,6 +198,7 @@
       <div class="connect-row">
         <input type="text" id="serverPort" value="localhost:8000" placeholder="localhost:8000">
         <button id="connectBtn">Connect</button>
+        <button id="disconnectBtn" style="background:#1a0000;color:#ff4444;border:1px solid #550000;">Disconnect</button>
       </div>
       <div class="port-note">Local: <code>localhost:8000</code> · RunPod: <code>abc123-8000.proxy.runpod.net</code></div>
     </div>
@@ -657,6 +658,17 @@
     }
 
     connectBtn.addEventListener("click", connect);
+
+    document.getElementById("disconnectBtn").addEventListener("click", () => {
+      fetch("/broadcast", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ _disconnect: true })
+      }).catch(() => {});
+      _scopeConnected = false;
+      statusEl.textContent = "Viewer disconnected";
+      statusEl.className = "";
+    });
 
     // Initialize displays on load
     updateDisplays();

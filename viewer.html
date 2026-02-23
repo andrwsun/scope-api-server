@@ -60,11 +60,14 @@
     let _startGen = 0;
     let _activePc = null;
     let _activePipelineKey = null; // JSON.stringify of pipeline_ids for the active session
+    let _reconnectTimer = null;    // saved setTimeout ID — cancelled when start() fires to prevent duplicate sessions
+    let _stopped = false;          // set by _disconnect signal; cleared when new pipeline_ids arrive
 
     // FPS counter via requestVideoFrameCallback
-    let _frameCount = 0, _fpsTime = performance.now();
+    let _frameCount = 0, _fpsTime = performance.now(), _fpsActive = false;
     function startFPS() {
-      if (!videoEl.requestVideoFrameCallback) return;
+      if (!videoEl.requestVideoFrameCallback || _fpsActive) return;
+      _fpsActive = true;
       const label = connectionLabel();
       function onFrame() {
         _frameCount++;
@@ -99,6 +102,16 @@
 
       ws.onmessage = (event) => {
         const data = JSON.parse(event.data);
+        // Disconnect signal — kill current session and stop auto-reconnect.
+        if (data._disconnect) {
+          _stopped = true;
+          if (_reconnectTimer) { clearTimeout(_reconnectTimer); _reconnectTimer = null; }
+          if (_activePc) { _activePc.close(); _activePc = null; }
+          _activePipelineKey = null;
+          ++_startGen; // cancel any in-flight start()
+          statusEl.textContent = "disconnected";
+          return;
+        }
         if (data._mapped === false) return; // ignore unmapped OSC
         const params = {};
         Object.entries(data)
@@ -108,13 +121,15 @@
         // lastKnownParams entirely so stale params from the previous pipeline
         // don't bleed into the new session.
         if (params.pipeline_ids) {
+          _stopped = false; // new pipeline requested — clear any disconnect state
           lastKnownParams = params;
           // If the pipeline changed while we have an active session, close the
-          // stale PC and reconnect. Incrementing _startGen via start() cancels
-          // any in-flight onconnectionstatechange reconnect that fired at the
-          // same time, preventing duplicate Scope sessions.
+          // stale PC and reconnect. Cancel _reconnectTimer first so the stale
+          // onconnectionstatechange setTimeout can't fire and create a duplicate
+          // session after the new one is already established.
           const newKey = JSON.stringify(params.pipeline_ids);
           if (_activePipelineKey && _activePipelineKey !== newKey) {
+            if (_reconnectTimer) { clearTimeout(_reconnectTimer); _reconnectTimer = null; }
             if (_activePc) { _activePc.close(); _activePc = null; }
             _activePipelineKey = null;
             start();
@@ -136,6 +151,10 @@
     // The _startGen counter ensures only one invocation runs at a time —
     // any previous call aborts when it next checks gen !== _startGen.
     async function start() {
+      if (_stopped) return;
+      // Cancel any pending reconnect timer — prevents a stale setTimeout from
+      // firing after a successful connect and creating a duplicate Scope session.
+      if (_reconnectTimer) { clearTimeout(_reconnectTimer); _reconnectTimer = null; }
       const gen = ++_startGen;
 
       try {
@@ -196,7 +215,7 @@
             pc.close();
             _activePc = null;
             _activePipelineKey = null;
-            setTimeout(start, 3000); // auto-reconnect
+            _reconnectTimer = setTimeout(start, 3000); // auto-reconnect
           }
         };
 
@@ -264,7 +283,7 @@
               pc.close();
               _activePc = null;
               _activePipelineKey = null;
-              setTimeout(start, 2000);
+              _reconnectTimer = setTimeout(start, 2000);
             }
           }
         };
@@ -272,7 +291,7 @@
       } catch (e) {
         if (gen === _startGen) {
           statusEl.textContent = `error: ${e.message}`;
-          setTimeout(start, 3000);
+          _reconnectTimer = setTimeout(start, 3000);
         }
       }
     }
