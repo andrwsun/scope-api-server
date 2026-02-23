@@ -6,6 +6,15 @@ Scope API Test Server
 - Proxies /api/* to Scope engine (avoids CORS when Scope is remote)
 
 OSC message format:
+
+  Prompt pipelines (streamdiffusionv2, longlive, krea-realtime-video, etc.):
+  /prompt          "Hello World"  - set prompt slot 1 text
+  /prompt2         "Another"      - set prompt slot 2 text
+  /prompt_weight   70             - weight for slot 1 (0–100), only when slot 2 is enabled
+  /prompt2_weight  30             - weight for slot 2 (0–100)
+  /prompt2_toggle  1              - enable (1) or disable (0) prompt slot 2
+
+  text-display pipeline only:
   /text       "Hello World"   - text to display
   /text_r     0.8             - red   (0.0 - 1.0)
   /text_g     0.2             - green (0.0 - 1.0)
@@ -176,6 +185,26 @@ _PARAM_MAP = {
     "/bg_opacity": ("bg_opacity", float),
 }
 
+# Two-prompt state — persists across OSC messages so both slots are always known.
+# weight1/weight2 are 0–100 (Scope scale). prompt2_enabled gates whether slot 2 is sent.
+_prompt_state: dict = {
+    "prompt1": "",
+    "weight1": 100,
+    "prompt2": "",
+    "weight2": 0,
+    "prompt2_enabled": False,
+}
+
+
+def _build_prompts() -> list[dict]:
+    """Build the Scope prompts array from current _prompt_state."""
+    if _prompt_state["prompt2_enabled"] and _prompt_state["prompt2"]:
+        return [
+            {"text": _prompt_state["prompt1"], "weight": _prompt_state["weight1"]},
+            {"text": _prompt_state["prompt2"], "weight": _prompt_state["weight2"]},
+        ]
+    return [{"text": _prompt_state["prompt1"], "weight": 100}]
+
 
 async def _save_and_broadcast(data: dict):
     """Merge data into _last_broadcast and push to all WebSocket clients."""
@@ -195,23 +224,51 @@ def _osc_handler(address: str, *args):
         return
     raw = args[0]
 
-    # /prompt — universal for all prompt-based pipelines.
-    # Routes to whatever pipeline is currently loaded (not hardcoded to longlive).
-    # Ignored if no pipeline is loaded or the current pipeline doesn't accept prompts.
-    if address == "/prompt":
+    # /prompt, /prompt2 — set text for slot 1 or slot 2.
+    # /prompt_weight, /prompt2_weight — set blend weights (0–100).
+    # /prompt2_toggle — enable/disable slot 2 (send 1 to enable, 0 to disable).
+    # All ignored if the current pipeline doesn't accept prompts.
+    if address in ("/prompt", "/prompt2", "/prompt_weight", "/prompt2_weight", "/prompt2_toggle"):
         pipeline = _current_pipeline()
         if pipeline not in _PROMPT_PIPELINES:
-            print(f"[OSC] /prompt ignored — current pipeline {pipeline!r} doesn't accept prompts")
+            print(f"[OSC] {address} ignored — current pipeline {pipeline!r} doesn't accept prompts")
             return
-        text = str(raw)
-        current_ids = _last_broadcast.get("pipeline_ids", [pipeline])
+
+        if address == "/prompt":
+            _prompt_state["prompt1"] = str(raw)
+            print(f"[OSC] /prompt → {_prompt_state['prompt1']!r}")
+        elif address == "/prompt2":
+            _prompt_state["prompt2"] = str(raw)
+            print(f"[OSC] /prompt2 → {_prompt_state['prompt2']!r}")
+        elif address == "/prompt_weight":
+            try:
+                _prompt_state["weight1"] = int(float(raw))
+            except (ValueError, TypeError):
+                print(f"[OSC] Bad value for /prompt_weight: {raw}")
+                return
+            print(f"[OSC] /prompt_weight → {_prompt_state['weight1']}")
+        elif address == "/prompt2_weight":
+            try:
+                _prompt_state["weight2"] = int(float(raw))
+            except (ValueError, TypeError):
+                print(f"[OSC] Bad value for /prompt2_weight: {raw}")
+                return
+            print(f"[OSC] /prompt2_weight → {_prompt_state['weight2']}")
+        elif address == "/prompt2_toggle":
+            try:
+                _prompt_state["prompt2_enabled"] = bool(int(float(raw)))
+            except (ValueError, TypeError):
+                print(f"[OSC] Bad value for /prompt2_toggle: {raw}")
+                return
+            print(f"[OSC] /prompt2_toggle → {_prompt_state['prompt2_enabled']}")
+
+        # Send only prompts — no pipeline_ids so viewer doesn't treat this as a
+        # full pipeline state change (which would replace lastKnownParams and risk
+        # triggering an unnecessary reconnect).
         params = {
-            "pipeline_ids": current_ids,
-            "prompts": [{"text": text, "weight": 100}],
+            "prompts": _build_prompts(),
             "prompt_interpolation_method": "linear",
-            "denoising_step_list": [1000, 750, 500, 250],
         }
-        print(f"[OSC] /prompt → {text!r}  (pipeline: {pipeline})")
         if _loop:
             asyncio.run_coroutine_threadsafe(_save_and_broadcast(params), _loop)
         return
@@ -248,7 +305,8 @@ def _osc_handler(address: str, *args):
 def _run_osc_server():
     dispatcher = Dispatcher()
     dispatcher.set_default_handler(_osc_handler)
-    dispatcher.map("/prompt", _osc_handler)
+    for address in ("/prompt", "/prompt2", "/prompt_weight", "/prompt2_weight", "/prompt2_toggle"):
+        dispatcher.map(address, _osc_handler)
     for address in _PARAM_MAP:
         dispatcher.map(address, _osc_handler)
 
