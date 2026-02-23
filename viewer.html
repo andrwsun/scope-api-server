@@ -52,6 +52,9 @@
     let sendTimer = null;
     let lastKnownParams = {}; // persisted across data channel open/close
 
+    let _activePc = null;         // current peer connection
+    let _activePipelineKey = null; // JSON.stringify of pipeline_ids for the active session
+
     // FPS counter via requestVideoFrameCallback
     let _frameCount = 0, _fpsTime = performance.now();
     function startFPS() {
@@ -100,6 +103,17 @@
         // don't bleed into the new session.
         if (params.pipeline_ids) {
           lastKnownParams = params;
+          // If the pipeline changed while we have an active session, the old
+          // WebRTC session is now stale (Scope has swapped pipelines). Close it
+          // and reconnect so the viewer picks up the new pipeline immediately
+          // instead of freezing on the last frame of the old one.
+          const newKey = JSON.stringify(params.pipeline_ids);
+          if (_activePipelineKey && _activePipelineKey !== newKey) {
+            if (_activePc) { _activePc.close(); _activePc = null; }
+            _activePipelineKey = null;
+            start();
+            return; // start() will drain pendingParams on reconnect
+          }
         } else {
           Object.assign(lastKnownParams, params);
         }
@@ -146,6 +160,9 @@
         const iceRes  = await fetch(`${API_BASE}/api/v1/webrtc/ice-servers`, { cache: "no-store" });
         const { iceServers } = await iceRes.json();
         const pc = new RTCPeerConnection({ iceServers });
+        _activePc = pc;
+        _activePipelineKey = lastKnownParams.pipeline_ids
+          ? JSON.stringify(lastKnownParams.pipeline_ids) : null;
 
         dataChannel = pc.createDataChannel("parameters", { ordered: true });
         dataChannel.onopen = () => {
@@ -163,6 +180,8 @@
           if (data.type === "stream_stopped") {
             statusEl.textContent = "stream stopped";
             pc.close();
+            _activePc = null;
+            _activePipelineKey = null;
             setTimeout(start, 3000); // auto-reconnect
           }
         };
@@ -226,6 +245,8 @@
           if (pc.connectionState === "failed" || pc.connectionState === "disconnected") {
             statusEl.textContent = "reconnecting...";
             pc.close();
+            _activePc = null;
+            _activePipelineKey = null;
             setTimeout(start, 2000);
           }
         };
