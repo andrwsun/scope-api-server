@@ -40,8 +40,8 @@
     function connectionLabel() {
       if (!scopeParam) return "local";
       if (scopeParam.includes(".proxy.runpod.net")) {
-        const podPart = scopeParam.split(".proxy.runpod.net")[0]; // e.g. spn9b77k24v6c3-8000
-        const podId = podPart.substring(0, podPart.lastIndexOf("-")); // e.g. spn9b77k24v6c3
+        const podPart = scopeParam.split(".proxy.runpod.net")[0];
+        const podId = podPart.substring(0, podPart.lastIndexOf("-"));
         return `runpod · ${podId}`;
       }
       return scopeParam;
@@ -52,7 +52,13 @@
     let sendTimer = null;
     let lastKnownParams = {}; // persisted across data channel open/close
 
-    let _activePc = null;         // current peer connection
+    // _startGen is incremented every time start() is called.
+    // Each invocation captures its own gen; whenever gen !== _startGen the call
+    // has been superseded and must abort. This prevents two concurrent start()
+    // calls (pipeline-change trigger + onconnectionstatechange trigger) from
+    // both completing and creating two Scope sessions simultaneously.
+    let _startGen = 0;
+    let _activePc = null;
     let _activePipelineKey = null; // JSON.stringify of pipeline_ids for the active session
 
     // FPS counter via requestVideoFrameCallback
@@ -103,16 +109,16 @@
         // don't bleed into the new session.
         if (params.pipeline_ids) {
           lastKnownParams = params;
-          // If the pipeline changed while we have an active session, the old
-          // WebRTC session is now stale (Scope has swapped pipelines). Close it
-          // and reconnect so the viewer picks up the new pipeline immediately
-          // instead of freezing on the last frame of the old one.
+          // If the pipeline changed while we have an active session, close the
+          // stale PC and reconnect. Incrementing _startGen via start() cancels
+          // any in-flight onconnectionstatechange reconnect that fired at the
+          // same time, preventing duplicate Scope sessions.
           const newKey = JSON.stringify(params.pipeline_ids);
           if (_activePipelineKey && _activePipelineKey !== newKey) {
             if (_activePc) { _activePc.close(); _activePc = null; }
             _activePipelineKey = null;
             start();
-            return; // start() will drain pendingParams on reconnect
+            return;
           }
         } else {
           Object.assign(lastKnownParams, params);
@@ -126,10 +132,13 @@
 
     connectWebSocket();
 
-    // Connect to Scope and start streaming
+    // Connect to Scope and start streaming.
+    // The _startGen counter ensures only one invocation runs at a time —
+    // any previous call aborts when it next checks gen !== _startGen.
     async function start() {
+      const gen = ++_startGen;
+
       try {
-        // If ?scope= was given, configure the bridge server to proxy there
         if (scopeParam) {
           await fetch("/config/scope", {
             method: "POST",
@@ -137,10 +146,12 @@
             body: JSON.stringify({ host: scopeParam })
           }).catch(() => {});
         }
+        if (gen !== _startGen) return;
 
         // Wait for the control UI to load a pipeline — don't override it here
         statusEl.textContent = "waiting for pipeline...";
         while (true) {
+          if (gen !== _startGen) return; // superseded — bail out
           try {
             const r = await fetch(`${API_BASE}/api/v1/pipeline/status`, { cache: "no-store" });
             if (r.ok) {
@@ -154,11 +165,14 @@
           }
           await new Promise(r => setTimeout(r, 2000));
         }
+        if (gen !== _startGen) return;
 
         statusEl.textContent = "connecting WebRTC...";
 
         const iceRes  = await fetch(`${API_BASE}/api/v1/webrtc/ice-servers`, { cache: "no-store" });
         const { iceServers } = await iceRes.json();
+        if (gen !== _startGen) return;
+
         const pc = new RTCPeerConnection({ iceServers });
         _activePc = pc;
         _activePipelineKey = lastKnownParams.pipeline_ids
@@ -177,7 +191,7 @@
 
         dataChannel.onmessage = (event) => {
           const data = JSON.parse(event.data);
-          if (data.type === "stream_stopped") {
+          if (data.type === "stream_stopped" && gen === _startGen) {
             statusEl.textContent = "stream stopped";
             pc.close();
             _activePc = null;
@@ -196,6 +210,7 @@
 
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
+        if (gen !== _startGen) { pc.close(); return; }
 
         let sessionId = null;
         const queued = [];
@@ -226,6 +241,7 @@
             initialParameters: lastKnownParams
           })
         });
+        if (gen !== _startGen) { pc.close(); return; }
 
         const answer = await sdpRes.json();
         sessionId = answer.sessionId;
@@ -243,17 +259,21 @@
 
         pc.onconnectionstatechange = () => {
           if (pc.connectionState === "failed" || pc.connectionState === "disconnected") {
-            statusEl.textContent = "reconnecting...";
-            pc.close();
-            _activePc = null;
-            _activePipelineKey = null;
-            setTimeout(start, 2000);
+            if (gen === _startGen) {
+              statusEl.textContent = "reconnecting...";
+              pc.close();
+              _activePc = null;
+              _activePipelineKey = null;
+              setTimeout(start, 2000);
+            }
           }
         };
 
       } catch (e) {
-        statusEl.textContent = `error: ${e.message}`;
-        setTimeout(start, 3000);
+        if (gen === _startGen) {
+          statusEl.textContent = `error: ${e.message}`;
+          setTimeout(start, 3000);
+        }
       }
     }
 
