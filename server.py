@@ -225,7 +225,7 @@ def _osc_handler(address: str, *args):
     raw = args[0]
 
     # /prompt, /prompt2 — set text for slot 1 or slot 2.
-    # /prompt_weight, /prompt2_weight — set blend weights (0–100).
+    # /prompt_weight, /prompt2_weight — blend weights as any float (0.0–1.0 or 0–100, Scope normalizes).
     # /prompt2_toggle — enable/disable slot 2 (send 1 to enable, 0 to disable).
     # All ignored if the current pipeline doesn't accept prompts.
     if address in ("/prompt", "/prompt2", "/prompt_weight", "/prompt2_weight", "/prompt2_toggle"):
@@ -242,14 +242,14 @@ def _osc_handler(address: str, *args):
             print(f"[OSC] /prompt2 → {_prompt_state['prompt2']!r}")
         elif address == "/prompt_weight":
             try:
-                _prompt_state["weight1"] = int(float(raw))
+                _prompt_state["weight1"] = float(raw)
             except (ValueError, TypeError):
                 print(f"[OSC] Bad value for /prompt_weight: {raw}")
                 return
             print(f"[OSC] /prompt_weight → {_prompt_state['weight1']}")
         elif address == "/prompt2_weight":
             try:
-                _prompt_state["weight2"] = int(float(raw))
+                _prompt_state["weight2"] = float(raw)
             except (ValueError, TypeError):
                 print(f"[OSC] Bad value for /prompt2_weight: {raw}")
                 return
