@@ -130,9 +130,16 @@
           // session after the new one is already established.
           const newKey = JSON.stringify(params.pipeline_ids);
           if (_activePipelineKey && _activePipelineKey !== newKey) {
+            // Pipeline changed — close stale session and reconnect.
             if (_reconnectTimer) { clearTimeout(_reconnectTimer); _reconnectTimer = null; }
             if (_activePc) { _activePc.close(); _activePc = null; }
             _activePipelineKey = null;
+            start();
+            return;
+          }
+          if (!_activePc) {
+            // No active session (e.g. after Disconnect, error, or initial load with no
+            // pipeline yet). A new pipeline just loaded — kick off start() so we connect.
             start();
             return;
           }
