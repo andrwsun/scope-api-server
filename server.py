@@ -158,6 +158,9 @@ async def websocket_endpoint(websocket: WebSocket):
 
 # --- OSC ---
 
+# Pipelines that accept a text prompt (matches PROMPT_PIPELINES in index.html).
+_PROMPT_PIPELINES = {"streamdiffusionv2", "longlive", "krea-realtime-video", "reward-forcing", "memflow"}
+
 # text-display params: OSC address → (param key, type)
 _PARAM_MAP = {
     "/text":       ("text",       str),
@@ -175,44 +178,63 @@ async def _save_and_broadcast(data: dict):
     await _broadcast({**data, "_mapped": True})
 
 
+def _current_pipeline() -> str | None:
+    """Return the first pipeline_id from the last known broadcast, or None."""
+    ids = _last_broadcast.get("pipeline_ids")
+    return ids[0] if ids else None
+
+
 def _osc_handler(address: str, *args):
     if not args:
         return
     raw = args[0]
 
-    # /prompt → longlive format (TD sends a plain string on this address)
+    # /prompt — universal for all prompt-based pipelines.
+    # Routes to whatever pipeline is currently loaded (not hardcoded to longlive).
+    # Ignored if no pipeline is loaded or the current pipeline doesn't accept prompts.
     if address == "/prompt":
+        pipeline = _current_pipeline()
+        if pipeline not in _PROMPT_PIPELINES:
+            print(f"[OSC] /prompt ignored — current pipeline {pipeline!r} doesn't accept prompts")
+            return
         text = str(raw)
+        current_ids = _last_broadcast.get("pipeline_ids", [pipeline])
         params = {
-            "pipeline_ids": ["longlive"],
+            "pipeline_ids": current_ids,
             "prompts": [{"text": text, "weight": 100}],
             "prompt_interpolation_method": "linear",
             "denoising_step_list": [1000, 750, 500, 250],
         }
-        print(f"[OSC] /prompt → {text!r}")
+        print(f"[OSC] /prompt → {text!r}  (pipeline: {pipeline})")
         if _loop:
             asyncio.run_coroutine_threadsafe(_save_and_broadcast(params), _loop)
         return
 
-    if address not in _PARAM_MAP:
-        print(f"[OSC] Received (unmapped): {address} {list(args)}")
+    # text-display params — only forward when text-display is the active pipeline.
+    if address in _PARAM_MAP:
+        pipeline = _current_pipeline()
+        if pipeline != "text-display":
+            print(f"[OSC] {address} ignored — current pipeline is {pipeline!r}, not text-display")
+            return
+        key, cast = _PARAM_MAP[address]
+        try:
+            value = cast(raw)
+        except (ValueError, TypeError):
+            print(f"[OSC] Bad value for {address}: {raw}")
+            return
+        print(f"[OSC] {address} → {key} = {value!r}")
         if _loop:
             asyncio.run_coroutine_threadsafe(
-                _broadcast({"_osc_address": address, "_osc_value": str(raw), "_mapped": False}),
+                _save_and_broadcast({key: value}),
                 _loop,
             )
         return
 
-    key, cast = _PARAM_MAP[address]
-    try:
-        value = cast(raw)
-    except (ValueError, TypeError):
-        print(f"[OSC] Bad value for {address}: {raw}")
-        return
-    print(f"[OSC] {address} → {key} = {value!r}")
+    # Unknown address — log as unmapped.
+    print(f"[OSC] Received (unmapped): {address} {list(args)}")
     if _loop:
         asyncio.run_coroutine_threadsafe(
-            _save_and_broadcast({key: value}),
+            _broadcast({"_osc_address": address, "_osc_value": str(raw), "_mapped": False}),
             _loop,
         )
 
