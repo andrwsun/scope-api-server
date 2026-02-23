@@ -109,6 +109,7 @@
           if (_activePc) { _activePc.close(); _activePc = null; }
           _activePipelineKey = null;
           ++_startGen; // cancel any in-flight start()
+          videoEl.srcObject = null; // immediately black out — don't show stale frames
           statusEl.textContent = "disconnected";
           return;
         }

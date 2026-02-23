@@ -659,15 +659,30 @@
 
     connectBtn.addEventListener("click", connect);
 
-    document.getElementById("disconnectBtn").addEventListener("click", () => {
+    document.getElementById("disconnectBtn").addEventListener("click", async () => {
+      // 1. Tell viewer to black out and stop reconnecting immediately.
       fetch("/broadcast", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ _disconnect: true })
       }).catch(() => {});
       _scopeConnected = false;
-      statusEl.textContent = "Viewer disconnected";
+      statusEl.textContent = "Disconnecting — reloading pipeline to clear all sessions...";
       statusEl.className = "";
+
+      // 2. Reload the current pipeline — this is the only way to kill all active
+      //    Scope WebRTC sessions (including any orphaned ones from duplicate connects).
+      //    The reload unloads every session before bringing the pipeline back up.
+      try {
+        await fetch(`${API_BASE}/api/v1/pipeline/load`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ pipeline_ids: [pipelineSelect.value] })
+        });
+        statusEl.textContent = "Disconnected — click Connect to reconnect";
+      } catch (_) {
+        statusEl.textContent = "Disconnected (couldn't reach Scope to clear sessions)";
+      }
     });
 
     // Initialize displays on load
