@@ -17,21 +17,10 @@
       font-family: monospace; font-size: 11px; color: #444;
       pointer-events: none;
     }
-    #webcam-ctrl {
-      position: fixed; top: 10px; right: 12px;
-      font-family: monospace; font-size: 10px;
-      background: transparent; border: 1px solid #2a2a2a; color: #2a2a2a;
-      padding: 3px 8px; border-radius: 3px; cursor: pointer;
-      width: auto; transition: color 0.2s, border-color 0.2s;
-    }
-    #webcam-ctrl:hover { border-color: #555; color: #555; }
-    #webcam-ctrl.active { border-color: #00ff88; color: #00ff88; }
-    #webcam-ctrl.error { border-color: #ff4444; color: #ff4444; }
   </style>
 </head>
 <body>
   <video id="video" autoplay muted playsinline></video>
-  <button id="webcam-ctrl" title="Toggle webcam as pipeline video input">CAM</button>
   <div id="status">connecting...</div>
   <div id="info"></div>
 
@@ -43,16 +32,16 @@
     const scopeParam = new URLSearchParams(location.search).get("scope");
     const API_BASE = "";
 
-    const videoEl    = document.getElementById("video");
-    const statusEl   = document.getElementById("status");
-    const infoEl     = document.getElementById("info");
-    const webcamCtrl = document.getElementById("webcam-ctrl");
+    const videoEl  = document.getElementById("video");
+    const statusEl = document.getElementById("status");
+    const infoEl   = document.getElementById("info");
 
+    // Build the connection label: "local" or "runpod · <podId>"
     function connectionLabel() {
       if (!scopeParam) return "local";
       if (scopeParam.includes(".proxy.runpod.net")) {
-        const podPart = scopeParam.split(".proxy.runpod.net")[0];
-        const podId = podPart.substring(0, podPart.lastIndexOf("-"));
+        const podPart = scopeParam.split(".proxy.runpod.net")[0]; // e.g. spn9b77k24v6c3-8000
+        const podId = podPart.substring(0, podPart.lastIndexOf("-")); // e.g. spn9b77k24v6c3
         return `runpod · ${podId}`;
       }
       return scopeParam;
@@ -61,17 +50,9 @@
     let dataChannel = null;
     let pendingParams = {};
     let sendTimer = null;
-    let lastKnownParams = {};
+    let lastKnownParams = {}; // persisted across data channel open/close
 
-    // _startGen is incremented every time start() is called.
-    // Each invocation captures its own gen value. Whenever gen !== _startGen,
-    // the call has been superseded (e.g. by a webcam toggle) and must abort.
-    let _startGen = 0;
-    let _activePc = null;
-
-    // Webcam stream — if non-null its video track is added to the WebRTC offer
-    let _webcamStream = null;
-
+    // FPS counter via requestVideoFrameCallback
     let _frameCount = 0, _fpsTime = performance.now();
     function startFPS() {
       if (!videoEl.requestVideoFrameCallback) return;
@@ -90,6 +71,7 @@
       videoEl.requestVideoFrameCallback(onFrame);
     }
 
+    // Batch and throttle param sends to Scope (60fps cap)
     function scheduleSend() {
       if (sendTimer) return;
       sendTimer = setTimeout(() => {
@@ -101,17 +83,21 @@
       }, 16);
     }
 
+    // WebSocket — receives OSC parameter updates from server.py
     function connectWebSocket() {
       const wsProto = location.protocol === "https:" ? "wss" : "ws";
       const ws = new WebSocket(`${wsProto}://${location.host}/ws`);
 
       ws.onmessage = (event) => {
         const data = JSON.parse(event.data);
-        if (data._mapped === false) return;
+        if (data._mapped === false) return; // ignore unmapped OSC
         const params = {};
         Object.entries(data)
           .filter(([k]) => !k.startsWith("_"))
           .forEach(([k, v]) => { params[k] = v; });
+        // If pipeline_ids is present this is a full pipeline broadcast — replace
+        // lastKnownParams entirely so stale params from the previous pipeline
+        // don't bleed into the new session.
         if (params.pipeline_ids) {
           lastKnownParams = params;
         } else {
@@ -126,14 +112,10 @@
 
     connectWebSocket();
 
-    // Connect to Scope and start streaming.
-    // Uses a generation counter (_startGen) so that when this is called again
-    // (e.g. webcam toggled), the previous invocation self-aborts at the next
-    // await rather than racing to create a second peer connection.
+    // Connect to Scope and start streaming
     async function start() {
-      const gen = ++_startGen;
-
       try {
+        // If ?scope= was given, configure the bridge server to proxy there
         if (scopeParam) {
           await fetch("/config/scope", {
             method: "POST",
@@ -141,43 +123,36 @@
             body: JSON.stringify({ host: scopeParam })
           }).catch(() => {});
         }
-        if (gen !== _startGen) return;
 
+        // Wait for the control UI to load a pipeline — don't override it here
         statusEl.textContent = "waiting for pipeline...";
         while (true) {
-          if (gen !== _startGen) return; // superseded — bail out
           try {
             const r = await fetch(`${API_BASE}/api/v1/pipeline/status`, { cache: "no-store" });
             if (r.ok) {
               const { status } = await r.json();
               if (status === "loaded") break;
-              if (status === "error") statusEl.textContent = "pipeline error";
+              if (status === "error") { statusEl.textContent = "pipeline error"; }
             }
-          } catch (_) {}
+            // else: proxy not configured yet or Scope unreachable — keep retrying silently
+          } catch (_) {
+            // JSON parse error or network error — keep retrying silently
+          }
           await new Promise(r => setTimeout(r, 2000));
         }
-        if (gen !== _startGen) return;
 
         statusEl.textContent = "connecting WebRTC...";
 
-        const iceRes = await fetch(`${API_BASE}/api/v1/webrtc/ice-servers`, { cache: "no-store" });
+        const iceRes  = await fetch(`${API_BASE}/api/v1/webrtc/ice-servers`, { cache: "no-store" });
         const { iceServers } = await iceRes.json();
-        if (gen !== _startGen) return;
-
         const pc = new RTCPeerConnection({ iceServers });
-        _activePc = pc;
-
-        // If webcam is active, send its video track to Scope as pipeline video input.
-        // Must happen before createOffer() so the send transceiver appears in the SDP.
-        if (_webcamStream) {
-          const videoTrack = _webcamStream.getVideoTracks()[0];
-          if (videoTrack) pc.addTrack(videoTrack, _webcamStream);
-        }
 
         dataChannel = pc.createDataChannel("parameters", { ordered: true });
         dataChannel.onopen = () => {
           statusEl.textContent = "";
           infoEl.textContent = connectionLabel();
+          // Replay last known params — the broadcast replay from server.py arrives
+          // before the data channel exists, so params would otherwise be dropped.
           if (Object.keys(lastKnownParams).length) {
             dataChannel.send(JSON.stringify(lastKnownParams));
           }
@@ -185,15 +160,13 @@
 
         dataChannel.onmessage = (event) => {
           const data = JSON.parse(event.data);
-          if (data.type === "stream_stopped" && gen === _startGen) {
+          if (data.type === "stream_stopped") {
             statusEl.textContent = "stream stopped";
             pc.close();
-            _activePc = null;
-            setTimeout(start, 3000);
+            setTimeout(start, 3000); // auto-reconnect
           }
         };
 
-        // Receive transceiver for Scope's output video
         pc.addTransceiver("video");
         pc.ontrack = (event) => {
           if (event.streams?.[0]) {
@@ -204,7 +177,6 @@
 
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
-        if (gen !== _startGen) { pc.close(); return; }
 
         let sessionId = null;
         const queued = [];
@@ -235,7 +207,6 @@
             initialParameters: lastKnownParams
           })
         });
-        if (gen !== _startGen) { pc.close(); return; }
 
         const answer = await sdpRes.json();
         sessionId = answer.sessionId;
@@ -253,50 +224,17 @@
 
         pc.onconnectionstatechange = () => {
           if (pc.connectionState === "failed" || pc.connectionState === "disconnected") {
-            if (gen === _startGen) {
-              statusEl.textContent = "reconnecting...";
-              pc.close();
-              _activePc = null;
-              setTimeout(start, 2000);
-            }
+            statusEl.textContent = "reconnecting...";
+            pc.close();
+            setTimeout(start, 2000);
           }
         };
 
       } catch (e) {
-        if (gen === _startGen) {
-          statusEl.textContent = `error: ${e.message}`;
-          setTimeout(start, 3000);
-        }
+        statusEl.textContent = `error: ${e.message}`;
+        setTimeout(start, 3000);
       }
     }
-
-    // Webcam toggle.
-    // Closing the PC and calling start() increments _startGen, which causes
-    // any currently-running start() to abort when it next checks gen !== _startGen.
-    webcamCtrl.addEventListener("click", async () => {
-      if (_webcamStream) {
-        _webcamStream.getTracks().forEach(t => t.stop());
-        _webcamStream = null;
-        webcamCtrl.textContent = "CAM";
-        webcamCtrl.className = "";
-        if (_activePc) { _activePc.close(); _activePc = null; }
-        start();
-      } else {
-        try {
-          webcamCtrl.textContent = "CAM...";
-          _webcamStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
-          webcamCtrl.textContent = "CAM ●";
-          webcamCtrl.className = "active";
-          if (_activePc) { _activePc.close(); _activePc = null; }
-          start();
-        } catch (e) {
-          webcamCtrl.textContent = "CAM ✕";
-          webcamCtrl.className = "error";
-          setTimeout(() => { webcamCtrl.textContent = "CAM"; webcamCtrl.className = ""; }, 3000);
-          _webcamStream = null;
-        }
-      }
-    });
 
     start();
   </script>
