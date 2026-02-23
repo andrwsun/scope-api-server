@@ -103,7 +103,13 @@ async def broadcast_params(body: dict):
     """Push parameter updates from the control UI to all connected browser clients.
     The viewer receives these and forwards them to Scope via its own data channel."""
     global _last_broadcast
-    _last_broadcast = body  # save for new viewers that connect later
+    # Mirror viewer.html logic: replace on full pipeline state, merge on partial updates.
+    # Partial broadcasts (e.g. reset_cache:true) must not wipe pipeline_ids — otherwise
+    # _current_pipeline() returns None and subsequent OSC /prompt messages are dropped.
+    if "pipeline_ids" in body:
+        _last_broadcast = body
+    else:
+        _last_broadcast = {**_last_broadcast, **body}
     await _broadcast({**body, "_mapped": True, "_from_ui": True})
     return {"ok": True}
 
